@@ -49,43 +49,6 @@ jobs:
           python -m py_compile src/spark/*.py
           python -m py_compile src/airflow/dags/*.py
 
-      - name: Upload Spark jobs to S3
-        run: |
-          echo "📤 Deploying Spark jobs to S3..."
-          
-          # Get bucket name from Terraform outputs
-          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
-          echo "Target bucket: $RAW_DATA_BUCKET"
-          
-          # Upload ETL job
-          aws s3 cp src/spark/etl_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py
-          
-          # Upload ML training job
-          aws s3 cp src/spark/ml_training_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
-          
-          # Upload data preparation job
-          aws s3 cp src/spark/data_preparation_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py
-          
-          echo "✅ Spark jobs uploaded successfully"
-
-      - name: Upload Airflow DAG to MWAA
-        run: |
-          echo "📤 Deploying Airflow DAG to MWAA..."
-          
-          # Get MWAA bucket from Terraform outputs
-          export MWAA_BUCKET=$(aws s3 ls | grep mwaa-dags | awk '{print $3}')
-          echo "Target MWAA bucket: $MWAA_BUCKET"
-          
-          # Upload DAG
-          aws s3 cp src/airflow/dags/olist_data_pipeline.py \
-            s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
-          
-          echo "✅ Airflow DAG uploaded successfully"
-          echo "ℹ️ MWAA will auto-sync DAG from S3 within 1 minute"
-
       - name: Validate Terraform
         run: |
           echo "🔍 Validating Terraform configuration..."
@@ -120,6 +83,71 @@ jobs:
           # Show key outputs
           echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
           terraform output >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Spark jobs to S3
+        run: |
+          echo "📤 Deploying Spark jobs to S3..."
+          
+          # Get bucket name from AWS S3 listing
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          echo "Target bucket: $RAW_DATA_BUCKET"
+          
+          if [ -z "$RAW_DATA_BUCKET" ]; then
+            echo "❌ Error: Could not find raw-data bucket"
+            exit 1
+          fi
+          
+          # Upload ETL job
+          aws s3 cp src/spark/etl_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py
+          
+          # Upload ML training job
+          aws s3 cp src/spark/ml_training_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
+          
+          # Upload data preparation job
+          aws s3 cp src/spark/data_preparation_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py
+          
+          echo "✅ Spark jobs uploaded successfully"
+
+      - name: Upload Airflow DAG to MWAA
+        run: |
+          echo "📤 Deploying Airflow DAG to MWAA..."
+          
+          # Get MWAA bucket from AWS S3 listing
+          export MWAA_BUCKET=$(aws s3 ls | grep mwaa-dags | awk '{print $3}')
+          echo "Target MWAA bucket: $MWAA_BUCKET"
+          
+          if [ -z "$MWAA_BUCKET" ]; then
+            echo "❌ Error: Could not find mwaa-dags bucket"
+            exit 1
+          fi
+          
+          # Upload DAG
+          aws s3 cp src/airflow/dags/olist_data_pipeline.py \
+            s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
+          
+          echo "✅ Airflow DAG uploaded successfully"
+          echo "ℹ️ MWAA will auto-sync DAG from S3 within 1 minute"
+
+      - name: Upload source data files to S3
+        run: |
+          echo "📥 Uploading source data files..."
+          
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          
+          # Upload source CSV files
+          aws s3 cp olist_order_items_dataset.csv \
+            s3://${RAW_DATA_BUCKET}/source_supply/olist_order_items_dataset.csv
+          
+          aws s3 cp olist_order_payments_dataset.csv \
+            s3://${RAW_DATA_BUCKET}/source_financial/olist_order_payments_dataset.csv
+          
+          aws s3 cp olist_sellers_dataset.csv \
+            s3://${RAW_DATA_BUCKET}/source_supply/olist_sellers_dataset.csv
+          
+          echo "✅ Source data files uploaded successfully"
 
       - name: Update Glue job configurations
         run: |
