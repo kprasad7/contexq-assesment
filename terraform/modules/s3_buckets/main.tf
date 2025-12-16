@@ -5,9 +5,9 @@ resource "aws_s3_bucket" "raw_data" {
   tags = merge(
     var.tags,
     {
-      Name        = "${var.name_prefix}-raw-data"
-      BucketType  = "Raw"
-      Purpose     = "Source data storage"
+      Name       = "${var.name_prefix}-raw-data"
+      BucketType = "Raw"
+      Purpose    = "Source data storage"
     }
   )
 }
@@ -26,8 +26,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "raw_data" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm      = var.enable_kms_encryption ? "aws:kms" : "AES256"
-      kms_master_key_id  = var.enable_kms_encryption ? var.kms_key_id : null
+      sse_algorithm     = var.enable_kms_encryption ? "aws:kms" : "AES256"
+      kms_master_key_id = var.enable_kms_encryption ? var.kms_key_id : null
     }
     bucket_key_enabled = true
   }
@@ -86,9 +86,9 @@ resource "aws_s3_bucket" "processed_data" {
   tags = merge(
     var.tags,
     {
-      Name        = "${var.name_prefix}-processed-data"
-      BucketType  = "Processed"
-      Purpose     = "Iceberg warehouse and transformed data"
+      Name       = "${var.name_prefix}-processed-data"
+      BucketType = "Processed"
+      Purpose    = "Iceberg warehouse and transformed data"
     }
   )
 }
@@ -106,8 +106,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "processed_data" {
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm      = var.enable_kms_encryption ? "aws:kms" : "AES256"
-      kms_master_key_id  = var.enable_kms_encryption ? var.kms_key_id : null
+      sse_algorithm     = var.enable_kms_encryption ? "aws:kms" : "AES256"
+      kms_master_key_id = var.enable_kms_encryption ? var.kms_key_id : null
     }
     bucket_key_enabled = true
   }
@@ -166,9 +166,9 @@ resource "aws_s3_bucket" "mlflow_artifacts" {
   tags = merge(
     var.tags,
     {
-      Name        = "${var.name_prefix}-mlflow"
-      BucketType  = "MLflow"
-      Purpose     = "ML model artifacts and metadata"
+      Name       = "${var.name_prefix}-mlflow"
+      BucketType = "MLflow"
+      Purpose    = "ML model artifacts and metadata"
     }
   )
 }
@@ -186,8 +186,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "mlflow_artifacts"
 
   rule {
     apply_server_side_encryption_by_default {
-      sse_algorithm      = var.enable_kms_encryption ? "aws:kms" : "AES256"
-      kms_master_key_id  = var.enable_kms_encryption ? var.kms_key_id : null
+      sse_algorithm     = var.enable_kms_encryption ? "aws:kms" : "AES256"
+      kms_master_key_id = var.enable_kms_encryption ? var.kms_key_id : null
     }
     bucket_key_enabled = true
   }
@@ -237,9 +237,9 @@ resource "aws_s3_bucket" "logs" {
   tags = merge(
     var.tags,
     {
-      Name        = "${var.name_prefix}-logs"
-      BucketType  = "Logs"
-      Purpose     = "S3 access logs aggregation"
+      Name       = "${var.name_prefix}-logs"
+      BucketType = "Logs"
+      Purpose    = "S3 access logs aggregation"
     }
   )
 }

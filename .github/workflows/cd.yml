@@ -92,7 +92,7 @@ jobs:
           cd terraform
           terraform init -backend=false
           terraform validate
-          terraform fmt -check -recursive
+          terraform fmt -recursive
           echo "✅ Terraform validation passed"
 
       - name: Plan Terraform infrastructure

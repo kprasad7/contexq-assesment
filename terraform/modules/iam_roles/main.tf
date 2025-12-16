@@ -1,8 +1,8 @@
 # Glue Service Role
 resource "aws_iam_role" "glue_service_role" {
-  name               = var.role_name
-  assume_role_policy = data.aws_iam_policy_document.assume_role.json
-  description        = "Service role for AWS Glue jobs"
+  name                 = var.role_name
+  assume_role_policy   = data.aws_iam_policy_document.assume_role.json
+  description          = "Service role for AWS Glue jobs"
   max_session_duration = 3600
 
   tags = var.tags

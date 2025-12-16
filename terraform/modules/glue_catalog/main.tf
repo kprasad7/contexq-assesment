@@ -14,11 +14,11 @@ resource "aws_glue_catalog_table" "corporate_registry" {
   description   = "Corporate registry with ACID transaction support via Apache Iceberg"
 
   parameters = {
-    EXTERNAL_TABLE_NAME       = var.table_name
-    table_type                = "ICEBERG"
-    classification            = "iceberg"
-    write_compression         = "snappy"
-    read_compression          = "snappy"
+    EXTERNAL_TABLE_NAME      = var.table_name
+    table_type               = "ICEBERG"
+    classification           = "iceberg"
+    write_compression        = "snappy"
+    read_compression         = "snappy"
     "iceberg.format.version" = "2"
   }
 

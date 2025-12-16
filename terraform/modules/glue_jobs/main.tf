@@ -8,12 +8,12 @@ resource "aws_cloudwatch_log_group" "glue_jobs" {
 
 # Primary Glue ETL Job
 resource "aws_glue_job" "etl_job" {
-  name       = var.job_name
-  role_arn   = var.role_arn
+  name         = var.job_name
+  role_arn     = var.role_arn
   glue_version = var.glue_version
-  timeout    = var.timeout_minutes
-  max_retries = var.max_retries
-  description = "ETL job for corporate data harmonization and Iceberg merge"
+  timeout      = var.timeout_minutes
+  max_retries  = var.max_retries
+  description  = "ETL job for corporate data harmonization and Iceberg merge"
 
   worker_type       = var.worker_type
   number_of_workers = var.num_workers
@@ -29,22 +29,22 @@ resource "aws_glue_job" "etl_job" {
   }
 
   default_arguments = {
-    "--job-bookmark-option"                 = "job-bookmark-enable"
-    "--enable-continuous-cloudwatch-log"   = "true"
-    "--enable-spark-ui"                    = "true"
-    "--spark-event-logs-path"              = var.temp_dir
-    "--enable-glue-datacatalog"            = "true"
-    "--enable-metrics"                     = "true"
-    "--TempDir"                            = var.temp_dir
-    "--job-language"                       = "python"
+    "--job-bookmark-option"              = "job-bookmark-enable"
+    "--enable-continuous-cloudwatch-log" = "true"
+    "--enable-spark-ui"                  = "true"
+    "--spark-event-logs-path"            = var.temp_dir
+    "--enable-glue-datacatalog"          = "true"
+    "--enable-metrics"                   = "true"
+    "--TempDir"                          = var.temp_dir
+    "--job-language"                     = "python"
 
     # Custom parameters for Glue job
-    "--source_bucket"                      = replace(var.script_location, "/glue-scripts/", "")
-    "--target_bucket"                      = replace(var.temp_dir, "/glue-temp/", "")
-    "--database"                           = var.database_name
-    "--table"                              = var.table_name
-    "--output-partition-keys"              = "year,month"
-    "--catalog"                            = "glue"
+    "--source_bucket"         = replace(var.script_location, "/glue-scripts/", "")
+    "--target_bucket"         = replace(var.temp_dir, "/glue-temp/", "")
+    "--database"              = var.database_name
+    "--table"                 = var.table_name
+    "--output-partition-keys" = "year,month"
+    "--catalog"               = "glue"
   }
 
   tags = var.tags
@@ -54,12 +54,12 @@ resource "aws_glue_job" "etl_job" {
 
 # Optional: Data Quality Job
 resource "aws_glue_job" "data_quality_job" {
-  name       = "${var.job_name}-dq"
-  role_arn   = var.role_arn
+  name         = "${var.job_name}-dq"
+  role_arn     = var.role_arn
   glue_version = var.glue_version
-  timeout    = var.timeout_minutes
-  max_retries = 0
-  description = "Data quality checks for corporate registry"
+  timeout      = var.timeout_minutes
+  max_retries  = 0
+  description  = "Data quality checks for corporate registry"
 
   worker_type       = var.worker_type
   number_of_workers = var.num_workers
@@ -77,10 +77,10 @@ resource "aws_glue_job" "data_quality_job" {
   default_arguments = {
     "--job-bookmark-option"              = "job-bookmark-disable"
     "--enable-continuous-cloudwatch-log" = "true"
-    "--enable-metrics"                  = "true"
-    "--TempDir"                         = var.temp_dir
-    "--database"                        = var.database_name
-    "--table"                           = var.table_name
+    "--enable-metrics"                   = "true"
+    "--TempDir"                          = var.temp_dir
+    "--database"                         = var.database_name
+    "--table"                            = var.table_name
   }
 
   tags = var.tags
@@ -90,10 +90,10 @@ resource "aws_glue_job" "data_quality_job" {
 
 # Trigger for scheduled execution (optional)
 resource "aws_glue_trigger" "etl_schedule" {
-  name            = "${var.job_name}-scheduled"
-  type            = "SCHEDULED"
-  schedule        = "cron(0 2 * * ? *)" # Run at 2 AM UTC daily
-  description     = "Daily scheduled trigger for ETL job"
+  name              = "${var.job_name}-scheduled"
+  type              = "SCHEDULED"
+  schedule          = "cron(0 2 * * ? *)" # Run at 2 AM UTC daily
+  description       = "Daily scheduled trigger for ETL job"
   start_on_creation = true
 
   actions {
