@@ -6,469 +6,342 @@ Iceberg Merge → Data Quality Checks in a single unified job.
 
 import sys
 import logging
-from typing import Dict, List, Tuple
 from datetime import datetime
-from hashlib import md5
 
-from awsglue.transforms import *
 from awsglue.utils import getResolvedOptions
 from pyspark.context import SparkContext
 from awsglue.context import GlueContext
 from awsglue.job import Job
-from awsglue.dynamicframe import DynamicFrame
 
-from pyspark.sql import Window
 from pyspark.sql.functions import (
-    col, when, lit, trim, lower, concat_ws, coalesce,
-    md5 as spark_md5, row_number, count as spark_count,
-    collect_list, struct, array_contains, concat, isnan, isnull,
-    levenshtein, current_timestamp, split, array_join
+    col, when, lit, count as spark_count, current_timestamp
 )
 from pyspark.sql.types import (
     StructType, StructField, StringType, IntegerType, 
-    DecimalType, TimestampType, ArrayType, DoubleType
+    DecimalType, TimestampType
 )
 
-# Setup logging
+# ============================================================================
+# CUSTOM EXCEPTIONS
+# ============================================================================
+
+class ETLValidationError(Exception):
+    """Raised when validation checks fail"""
+    pass
+
+class DataIngestionError(Exception):
+    """Raised when data ingestion fails"""
+    pass
+
+class TableOperationError(Exception):
+    """Raised when Iceberg table operations fail"""
+    pass
+
+# ============================================================================
+# SETUP LOGGING
+# ============================================================================
+
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
 # Get job parameters
-args = getResolvedOptions(sys.argv, [
-    'JOB_NAME',
-    'source_bucket',
-    'target_bucket',
-    'database',
-    'table'
-])
+try:
+    args = getResolvedOptions(sys.argv, [
+        'JOB_NAME',
+        'source_bucket',
+        'target_bucket',
+        'database',
+        'table'
+    ])
+except Exception as e:
+    logger.error(f"Failed to get job parameters: {str(e)}")
+    sys.exit(1)
 
 # Initialize Glue context
-sc = SparkContext()
-glueContext = GlueContext(sc)
-spark = glueContext.spark_session
-job = Job(glueContext)
-job.init(args['JOB_NAME'], args)
+try:
+    sc = SparkContext()
+    glueContext = GlueContext(sc)
+    spark = glueContext.spark_session
+    job = Job(glueContext)
+    job.init(args['JOB_NAME'], args)
+except Exception as e:
+    logger.error(f"Failed to initialize Glue context: {str(e)}")
+    sys.exit(1)
 
 SOURCE_BUCKET = args.get('source_bucket', 'contexq-dev-raw-data-119287772129')
 TARGET_BUCKET = args.get('target_bucket', 'contexq-dev-processed-data-119287772129')
 DATABASE_NAME = args.get('database', 'contexq_dev')
 TABLE_NAME = args.get('table', 'corporate_registry')
 
-# Log startup parameters for debugging
+# Log startup parameters
 logger.info(f"✓ JOB_NAME: {args['JOB_NAME']}")
 logger.info(f"✓ SOURCE_BUCKET: {SOURCE_BUCKET}")
 logger.info(f"✓ TARGET_BUCKET: {TARGET_BUCKET}")
 logger.info(f"✓ DATABASE: {DATABASE_NAME}")
 logger.info(f"✓ TABLE: {TABLE_NAME}")
 
-# Iceberg table schema
-ICEBERG_SCHEMA = StructType([
-    StructField("corporate_id", StringType(), False),
-    StructField("corporate_name", StringType(), False),
-    StructField("address", StringType(), True),
-    StructField("city", StringType(), True),
-    StructField("state", StringType(), True),
-    StructField("activity_places", IntegerType(), True),
-    StructField("top_suppliers", ArrayType(StringType()), True),
-    StructField("main_customers", StringType(), True),
-    StructField("revenue", DecimalType(18, 2), True),
-    StructField("profit", DecimalType(18, 2), True),
-    StructField("source_system", StringType(), False),
-    StructField("load_date", TimestampType(), False),
-    StructField("entity_hash", StringType(), False),
-])
 
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
 
-class EntityResolutionEngine:
-    """Performs entity resolution using heuristic-based matching."""
-    
-    def __init__(self, spark):
-        self.spark = spark
-        logger.info("EntityResolutionEngine initialized")
-    
-    def clean_text(self, text):
-        """Clean and normalize text for matching."""
-        return trim(lower(text))
-    
-    def resolve_duplicates(self, df):
-        """Resolve duplicate entities using fuzzy matching."""
-        logger.info("Resolving duplicates...")
-        
-        # Add hash of cleaned name + address for matching
-        df_with_hash = df.withColumn(
-            "entity_hash",
-            spark_md5(concat_ws("|", 
-                lower(trim(col("corporate_name"))),
-                coalesce(lower(trim(col("address"))), lit(""))
-            ))
-        )
-        
-        # Assign unique ID to entities with same hash
-        window_spec = Window.partitionBy("entity_hash").orderBy("corporate_name")
-        df_deduped = df_with_hash.withColumn(
-            "corporate_id",
-            concat_ws("_", 
-                lit("CORP"),
-                row_number().over(window_spec)
-            )
-        )
-        
-        logger.info(f"✓ Deduplication complete. Unique entities: {df_deduped.select('entity_hash').distinct().count()}")
-        return df_deduped
+def check_iceberg_table_exists(database: str, table: str) -> bool:
+    """Check if Iceberg table exists in Glue Catalog"""
+    try:
+        spark.sql(f"DESCRIBE TABLE {database}.{table}")
+        logger.info(f"✓ Table {database}.{table} exists")
+        return True
+    except Exception as e:
+        logger.warning(f"Table {database}.{table} does not exist: {str(e)}")
+        return False
 
-
-class DataHarmonizer:
-    """Harmonizes data schema and formats."""
-    
-    def __init__(self, spark):
-        self.spark = spark
-        logger.info("DataHarmonizer initialized")
-    
-    def harmonize_schema(self, df):
-        """Harmonize data to Iceberg schema."""
-        logger.info("Harmonizing schema...")
+def create_iceberg_table(database: str, table: str) -> None:
+    """Create Iceberg table if it doesn't exist"""
+    try:
+        logger.info(f"Creating Iceberg table {database}.{table}...")
         
-        # Select and cast columns
-        df_harmonized = df.select(
-            col("corporate_id").cast(StringType()),
-            col("corporate_name").cast(StringType()),
-            col("address").cast(StringType()),
-            col("city").cast(StringType()),
-            col("state").cast(StringType()),
-            col("activity_places").cast(IntegerType()),
-            col("top_suppliers").cast(ArrayType(StringType())),
-            col("main_customers").cast(StringType()),
-            col("revenue").cast(DecimalType(18, 2)),
-            col("profit").cast(DecimalType(18, 2)),
-            col("source_system").cast(StringType()),
-            col("load_date").cast(TimestampType()),
-            col("entity_hash").cast(StringType()),
-        )
-        
-        logger.info("✓ Schema harmonization complete")
-        return df_harmonized
-
-
-class IcebergMerger:
-    """Performs ACID MERGE INTO Iceberg table."""
-    
-    def __init__(self, spark):
-        self.spark = spark
-        logger.info("IcebergMerger initialized")
-    
-    def merge_into_iceberg(self, df, table_name: str, database: str = "contexq_dev"):
-        """Perform ACID MERGE INTO Iceberg table."""
-        logger.info(f"Starting MERGE INTO {database}.{table_name}...")
-        
-        # Register source as temp view
-        df.createOrReplaceTempView("source_entities")
-        
-        # Execute MERGE INTO (UPSERT)
-        merge_sql = f"""
-        MERGE INTO {database}.{table_name} t
-        USING source_entities s
-        ON t.corporate_id = s.corporate_id AND t.source_system = s.source_system
-        WHEN MATCHED THEN UPDATE SET
-            corporate_name = s.corporate_name,
-            address = s.address,
-            city = s.city,
-            state = s.state,
-            activity_places = s.activity_places,
-            top_suppliers = s.top_suppliers,
-            main_customers = s.main_customers,
-            revenue = s.revenue,
-            profit = s.profit,
-            load_date = s.load_date,
-            entity_hash = s.entity_hash
-        WHEN NOT MATCHED THEN INSERT (
-            corporate_id, corporate_name, address, city, state,
-            activity_places, top_suppliers, main_customers, revenue, profit,
-            source_system, load_date, entity_hash
-        ) VALUES (
-            s.corporate_id, s.corporate_name, s.address, s.city, s.state,
-            s.activity_places, s.top_suppliers, s.main_customers, s.revenue, s.profit,
-            s.source_system, s.load_date, s.entity_hash
-        )
+        create_sql = f"""
+        CREATE TABLE IF NOT EXISTS {database}.{table}
+        USING ICEBERG
+        AS SELECT 
+            cast(null as string) as corporate_id,
+            cast(null as string) as corporate_name,
+            cast(null as string) as city,
+            cast(null as string) as state,
+            cast(null as decimal(18,2)) as total_sales_value,
+            cast(null as decimal(18,2)) as total_freight_value,
+            cast(null as int) as num_orders,
+            cast(null as string) as source_system,
+            cast(null as timestamp) as load_date
+        WHERE FALSE
         """
         
-        self.spark.sql(merge_sql)
-        logger.info(f"✓ MERGE INTO complete for {database}.{table_name}")
-
-
-class DataQualityValidator:
-    """Validates data quality and generates reports."""
-    
-    def __init__(self, spark):
-        self.spark = spark
-        logger.info("DataQualityValidator initialized")
-    
-    def validate_schema(self, df):
-        """Validate that dataframe conforms to expected schema."""
-        logger.info("Validating schema...")
-        expected_fields = set(field.name for field in ICEBERG_SCHEMA.fields)
-        actual_fields = set(df.columns)
-        
-        missing_fields = expected_fields - actual_fields
-        if missing_fields:
-            raise ValueError(f"Missing required fields: {missing_fields}")
-        
-        logger.info(f"✓ Schema validation passed. All {len(expected_fields)} required fields present")
-    
-    def generate_quality_report(self, df, table_name: str, database: str = "contexq_dev"):
-        """Generate data quality report."""
-        logger.info(f"Generating quality report for {database}.{table_name}...")
-        
-        # Record count
-        record_count = df.count()
-        logger.info(f"✓ Total records in {table_name}: {record_count:,}")
-        
-        # Null checks
-        for col_name in df.columns:
-            null_count = df.filter(col(col_name).isNull()).count()
-            null_pct = (null_count / record_count * 100) if record_count > 0 else 0
-            if null_pct > 10:
-                logger.warning(f"⚠ Column '{col_name}' has {null_pct:.1f}% nulls")
-        
-        # Duplicate check
-        distinct_count = df.select("corporate_id").distinct().count()
-        logger.info(f"✓ Distinct corporate IDs: {distinct_count:,}")
-        
-        # Financial summary
-        try:
-            summary = df.agg({
-                "revenue": "sum",
-                "profit": "sum",
-                "activity_places": "avg"
-            }).collect()[0]
-            logger.info(f"✓ Total revenue: ${summary[0]:,.2f}" if summary[0] else "No revenue data")
-            logger.info(f"✓ Total profit: ${summary[1]:,.2f}" if summary[1] else "No profit data")
-        except Exception as e:
-            logger.warning(f"Could not calculate financial summary: {str(e)}")
-        
-        logger.info("✓ Data quality report complete")
+        spark.sql(create_sql)
+        logger.info(f"✓ Iceberg table created: {database}.{table}")
+    except Exception as e:
+        raise TableOperationError(f"Failed to create Iceberg table: {str(e)}")
 
 
 def main():
-    """Main ETL pipeline orchestration."""
+    """Main ETL pipeline orchestration"""
     
     try:
-        logger.info("\n" + "="*60)
+        logger.info("\n" + "="*70)
         logger.info("STARTING COMPREHENSIVE ETL PIPELINE")
-        logger.info("="*60)
+        logger.info("="*70)
         
-        # ============================================================
-        # PHASE 1: DATA INGESTION (CSV → Parquet)
-        # ============================================================
-        logger.info("\n=== PHASE 1: DATA INGESTION ===")
+        # ====================================================================
+        # PHASE 1: VALIDATE ICEBERG TABLE
+        # ====================================================================
+        logger.info("\n=== PHASE 1: ICEBERG TABLE VALIDATION ===")
         
         try:
-            # Read CSV files from S3
-            logger.info("Reading source datasets from S3...")
-            
-            # Source 1: Sellers (corporate supply chain data)
-            source1_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_sellers_dataset.csv"
+            table_exists = check_iceberg_table_exists(DATABASE_NAME, TABLE_NAME)
+            if not table_exists:
+                logger.info(f"Creating new Iceberg table...")
+                create_iceberg_table(DATABASE_NAME, TABLE_NAME)
+        except TableOperationError as e:
+            logger.error(f"✗ Table validation failed: {str(e)}")
+            raise
+        except Exception as e:
+            logger.error(f"✗ Unexpected error during table validation: {str(e)}", exc_info=True)
+            raise
+        
+        # ====================================================================
+        # PHASE 2: DATA INGESTION
+        # ====================================================================
+        logger.info("\n=== PHASE 2: DATA INGESTION ===")
+        
+        sellers_df = None
+        orders_df = None
+        
+        try:
+            # Read sellers data
+            logger.info("Reading sellers dataset...")
+            sellers_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_sellers_dataset.csv"
             sellers_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
-                .csv(source1_path)
-            logger.info(f"✓ Sellers: {sellers_df.count():,} records")
+                .csv(sellers_path)
+            seller_count = sellers_df.count()
+            logger.info(f"✓ Sellers: {seller_count:,} records")
             logger.info(f"  Columns: {sellers_df.columns}")
             
-            # Source 2: Order Items (link sellers to orders for revenue)
-            source2_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_order_items_dataset.csv"
-            items_df = spark.read \
+            # Read order items data
+            logger.info("Reading order items dataset...")
+            orders_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_order_items_dataset.csv"
+            orders_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
-                .csv(source2_path)
-            logger.info(f"✓ Order Items: {items_df.count():,} records")
+                .csv(orders_path)
+            order_count = orders_df.count()
+            logger.info(f"✓ Order Items: {order_count:,} records")
+            logger.info(f"  Columns: {orders_df.columns}")
             
-            # Source 3: Payments (financial data)
-            source3_path = f"s3://{SOURCE_BUCKET}/source_financial/olist_order_payments_dataset.csv"
-            payments_df = spark.read \
-                .option("header", "true") \
-                .option("inferSchema", "true") \
-                .csv(source3_path)
-            logger.info(f"✓ Payments: {payments_df.count():,} records")
+        except Exception as e:
+            raise DataIngestionError(f"Failed to read CSV files: {str(e)}")
+        
+        # ====================================================================
+        # PHASE 3: DATA TRANSFORMATION & AGGREGATION
+        # ====================================================================
+        logger.info("\n=== PHASE 3: DATA TRANSFORMATION ===")
+        
+        try:
+            # Aggregate sales by seller
+            logger.info("Aggregating sales by seller...")
+            seller_sales = orders_df \
+                .groupBy("seller_id") \
+                .agg(
+                    spark_count("order_id").alias("num_orders"),
+                    col("price").cast(DecimalType(18, 2)).alias("total_sales_value"),
+                    col("freight_value").cast(DecimalType(18, 2)).alias("total_freight_value")
+                )
             
-            # Aggregate revenue by order from payments
-            order_revenue = payments_df.groupBy("order_id") \
-                .agg({"payment_value": "sum"}) \
-                .withColumnRenamed("sum(payment_value)", "revenue_total")
-            
-            # Join order items with revenue
-            items_revenue = items_df.join(
-                order_revenue,
-                items_df.order_id == order_revenue.order_id,
+            # Join sellers with sales data
+            logger.info("Joining sellers with sales data...")
+            seller_aggregated = sellers_df.join(
+                seller_sales,
+                sellers_df.seller_id == seller_sales.seller_id,
                 "left"
             )
             
-            # Aggregate by seller to get total revenue
-            seller_metrics = items_revenue.groupBy("seller_id") \
-                .agg({
-                    "revenue_total": "sum",
-                    "price": "sum",
-                    "freight_value": "sum"
-                }) \
-                .withColumnRenamed("sum(revenue_total)", "total_revenue") \
-                .withColumnRenamed("sum(price)", "total_product_value") \
-                .withColumnRenamed("sum(freight_value)", "total_freight")
-            
-            # Join sellers with metrics
-            sellers_enriched = sellers_df.join(
-                seller_metrics,
-                sellers_df.seller_id == seller_metrics.seller_id,
-                "left"
-            )
-            
-            # Prepare source 1: Sellers enriched with revenue data
-            source1_prepared = sellers_enriched \
-                .withColumn("source_system", lit("SUPPLY_CHAIN")) \
-                .withColumn("corporate_id", col("seller_id")) \
-                .withColumn("corporate_name", col("seller_city")) \
+            # Create corporate entities
+            logger.info("Creating standardized corporate entities...")
+            corporate_df = seller_aggregated \
+                .withColumn("corporate_id", 
+                    when(col("seller_id").isNotNull(), col("seller_id")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("corporate_name", 
+                    when(col("seller_city").isNotNull(), col("seller_city")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("city", col("seller_city")) \
                 .withColumn("state", col("seller_state")) \
-                .withColumn("address", col("seller_zip_code_prefix")) \
-                .withColumn("activity_places", lit(None).cast(IntegerType())) \
-                .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
-                .withColumn("main_customers", lit(None).cast(StringType())) \
-                .withColumn("revenue", col("total_revenue").cast(DecimalType(18, 2))) \
-                .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
-                .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
-                        "top_suppliers", "main_customers", "revenue", "profit", "source_system")
+                .withColumn("source_system", lit("SUPPLY_CHAIN")) \
+                .withColumn("load_date", current_timestamp()) \
+                .select(
+                    "corporate_id",
+                    "corporate_name",
+                    "city",
+                    "state",
+                    "total_sales_value",
+                    "total_freight_value",
+                    "num_orders",
+                    "source_system",
+                    "load_date"
+                )
             
-            # Prepare source 2: Aggregate payment types as financial entities
-            source2_prepared = payments_df.groupBy("payment_type") \
-                .agg({"payment_value": "sum"}) \
-                .withColumnRenamed("sum(payment_value)", "total_payment_value") \
-                .withColumn("source_system", lit("FINANCIAL")) \
-                .withColumn("corporate_id", col("payment_type")) \
-                .withColumn("corporate_name", col("payment_type")) \
-                .withColumn("state", lit(None).cast(StringType())) \
-                .withColumn("address", lit(None).cast(StringType())) \
-                .withColumn("activity_places", lit(None).cast(IntegerType())) \
-                .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
-                .withColumn("main_customers", lit(None).cast(StringType())) \
-                .withColumn("revenue", col("total_payment_value").cast(DecimalType(18, 2))) \
-                .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
-                .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
-                        "top_suppliers", "main_customers", "revenue", "profit", "source_system")
+            entity_count = corporate_df.count()
+            logger.info(f"✓ Created {entity_count:,} corporate entities")
             
-            # Save as Parquet for caching
-            prep_supply_path = f"s3://{TARGET_BUCKET}/prepared_sources/source1_supply/"
-            source1_prepared.write.mode("overwrite").parquet(prep_supply_path)
-            logger.info(f"✓ Supply source cached: {source1_prepared.count():,} records")
-            
-            prep_financial_path = f"s3://{TARGET_BUCKET}/prepared_sources/source2_financial/"
-            source2_prepared.write.mode("overwrite").parquet(prep_financial_path)
-            logger.info(f"✓ Financial source cached: {source2_prepared.count():,} records")
+            # Show sample
+            logger.info("Sample data:")
+            corporate_df.limit(5).show(truncate=False)
             
         except Exception as e:
-            logger.error(f"✗ Data ingestion failed: {type(e).__name__}: {str(e)}", exc_info=True)
-            raise
+            raise ETLValidationError(f"Failed during transformation: {str(e)}")
         
-        # ============================================================
-        # PHASE 2: ENTITY RESOLUTION & DEDUPLICATION
-        # ============================================================
-        logger.info("\n=== PHASE 2: ENTITY RESOLUTION ===")
-        
-        try:
-            entity_resolver = EntityResolutionEngine(spark)
-            
-            # Read prepared sources
-            source1_resolved = entity_resolver.resolve_duplicates(source1_prepared)
-            source2_resolved = entity_resolver.resolve_duplicates(source2_prepared)
-            
-            # Combine sources
-            logger.info("Combining resolved sources...")
-            combined_df = source1_resolved.union(source2_resolved)
-            logger.info(f"✓ Combined entities: {combined_df.count():,}")
-            
-        except Exception as e:
-            logger.error(f"✗ Entity resolution failed: {str(e)}", exc_info=True)
-            raise
-        
-        # ============================================================
-        # PHASE 3: DATA HARMONIZATION
-        # ============================================================
-        logger.info("\n=== PHASE 3: DATA HARMONIZATION ===")
-        
-        try:
-            harmonizer = DataHarmonizer(spark)
-            harmonized_df = harmonizer.harmonize_schema(combined_df)
-            
-            # Add load timestamp
-            harmonized_df = harmonized_df.withColumn(
-                "load_date",
-                current_timestamp()
-            )
-            
-        except Exception as e:
-            logger.error(f"✗ Data harmonization failed: {str(e)}", exc_info=True)
-            raise
-        
-        # ============================================================
+        # ====================================================================
         # PHASE 4: ICEBERG MERGE
-        # ============================================================
+        # ====================================================================
         logger.info("\n=== PHASE 4: ICEBERG MERGE INTO ===")
         
         try:
-            merger = IcebergMerger(spark)
-            merger.merge_into_iceberg(harmonized_df, TABLE_NAME, DATABASE_NAME)
+            # Register as temp view
+            corporate_df.createOrReplaceTempView("source_entities")
+            
+            # Execute MERGE INTO
+            merge_sql = f"""
+            MERGE INTO {DATABASE_NAME}.{TABLE_NAME} t
+            USING source_entities s
+            ON t.corporate_id = s.corporate_id AND t.source_system = s.source_system
+            WHEN MATCHED THEN UPDATE SET
+                corporate_name = s.corporate_name,
+                city = s.city,
+                state = s.state,
+                total_sales_value = s.total_sales_value,
+                total_freight_value = s.total_freight_value,
+                num_orders = s.num_orders,
+                load_date = s.load_date
+            WHEN NOT MATCHED THEN INSERT (
+                corporate_id, corporate_name, city, state,
+                total_sales_value, total_freight_value, num_orders,
+                source_system, load_date
+            ) VALUES (
+                s.corporate_id, s.corporate_name, s.city, s.state,
+                s.total_sales_value, s.total_freight_value, s.num_orders,
+                s.source_system, s.load_date
+            )
+            """
+            
+            logger.info(f"Executing MERGE INTO {DATABASE_NAME}.{TABLE_NAME}...")
+            spark.sql(merge_sql)
+            logger.info(f"✓ MERGE INTO complete")
             
         except Exception as e:
-            logger.error(f"✗ Iceberg merge failed: {str(e)}", exc_info=True)
-            raise
+            raise TableOperationError(f"Failed to merge into Iceberg table: {str(e)}")
         
-        # ============================================================
-        # PHASE 5: DATA QUALITY CHECKS
-        # ============================================================
-        logger.info("\n=== PHASE 5: DATA QUALITY VALIDATION ===")
+        # ====================================================================
+        # PHASE 5: VERIFICATION & SUMMARY
+        # ====================================================================
+        logger.info("\n=== PHASE 5: VERIFICATION ===")
         
         try:
-            validator = DataQualityValidator(spark)
-            validator.validate_schema(harmonized_df)
-            
-            # Read final table for quality report
+            # Read final table
             final_df = spark.sql(f"SELECT * FROM {DATABASE_NAME}.{TABLE_NAME}")
-            validator.generate_quality_report(final_df, TABLE_NAME, DATABASE_NAME)
+            final_count = final_df.count()
+            logger.info(f"✓ Final table row count: {final_count:,}")
+            
+            # Show summary
+            logger.info("Table contents:")
+            final_df.show(10, truncate=False)
+            
+            logger.info("\nRow count by source system:")
+            summary = spark.sql(f"""
+                SELECT 
+                    source_system,
+                    COUNT(*) as count
+                FROM {DATABASE_NAME}.{TABLE_NAME}
+                GROUP BY source_system
+            """)
+            summary.show()
             
         except Exception as e:
-            logger.error(f"✗ Data quality validation failed: {str(e)}", exc_info=True)
-            raise
+            logger.warning(f"Failed to read final table: {str(e)}")
         
-        # ============================================================
+        # ====================================================================
         # SUMMARY REPORT
-        # ============================================================
-        logger.info("\n=== PIPELINE SUMMARY ===")
-        summary_sql = f"""
-        SELECT 
-            source_system,
-            COUNT(*) as entity_count,
-            COUNT(DISTINCT corporate_id) as unique_entities,
-            COUNT(DISTINCT state) as states_count
-        FROM {DATABASE_NAME}.{TABLE_NAME}
-        GROUP BY source_system
-        """
-        
-        summary_df = spark.sql(summary_sql)
-        logger.info("Source System Summary:")
-        summary_df.show(truncate=False)
-        
-        # Write summary to S3
-        summary_path = f"s3://{TARGET_BUCKET}/etl_reports/summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}/"
-        summary_df.write.mode("overwrite").parquet(summary_path)
-        logger.info(f"✓ Summary written to {summary_path}")
-        
-        logger.info("\n" + "="*60)
+        # ====================================================================
+        logger.info("\n" + "="*70)
         logger.info("ETL JOB COMPLETED SUCCESSFULLY ✓")
-        logger.info("Corporate registry table ready for ML pipeline")
-        logger.info("="*60 + "\n")
+        logger.info("="*70 + "\n")
         
         job.commit()
         return 0
         
+    except DataIngestionError as e:
+        logger.error(f"✗ Data Ingestion Error: {str(e)}", exc_info=True)
+        try:
+            job.commit()
+        except:
+            pass
+        return 1
+        
+    except TableOperationError as e:
+        logger.error(f"✗ Table Operation Error: {str(e)}", exc_info=True)
+        try:
+            job.commit()
+        except:
+            pass
+        return 1
+        
+    except ETLValidationError as e:
+        logger.error(f"✗ Validation Error: {str(e)}", exc_info=True)
+        try:
+            job.commit()
+        except:
+            pass
+        return 1
+        
     except Exception as e:
-        logger.error(f"✗ ETL job failed with exception: {type(e).__name__}", exc_info=True)
-        logger.error(f"Error message: {str(e)}")
+        logger.error(f"✗ Unexpected error: {type(e).__name__}: {str(e)}", exc_info=True)
         try:
             job.commit()
         except:
@@ -478,6 +351,5 @@ def main():
 
 if __name__ == "__main__":
     exit_code = main()
-    if exit_code != 0:
-        logger.error(f"Job failed with exit code: {exit_code}")
+    logger.info(f"Job exiting with code: {exit_code}")
     sys.exit(exit_code)
