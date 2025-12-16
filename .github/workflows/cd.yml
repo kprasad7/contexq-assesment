@@ -95,6 +95,29 @@ jobs:
           terraform fmt -recursive
           echo "✅ Terraform validation passed"
 
+      - name: Import existing S3 buckets
+        run: |
+          echo "📥 Importing existing S3 buckets into Terraform state..."
+          cd terraform
+          
+          # Import existing S3 buckets if they exist
+          aws s3 ls s3://contexq-dev-raw-data-119287772129/ 2>/dev/null && \
+            terraform import -auto-approve aws_s3_bucket.raw_data contexq-dev-raw-data-119287772129 || echo "ℹ️ raw_data bucket not found in AWS"
+          
+          aws s3 ls s3://contexq-dev-processed-data-119287772129/ 2>/dev/null && \
+            terraform import -auto-approve 'module.s3_buckets.aws_s3_bucket.processed_data' contexq-dev-processed-data-119287772129 || echo "ℹ️ processed_data bucket not found in AWS"
+          
+          aws s3 ls s3://contexq-dev-mlflow-artifacts-119287772129/ 2>/dev/null && \
+            terraform import -auto-approve 'module.s3_buckets.aws_s3_bucket.mlflow_artifacts' contexq-dev-mlflow-artifacts-119287772129 || echo "ℹ️ mlflow_artifacts bucket not found in AWS"
+          
+          aws s3 ls s3://contexq-dev-logs-119287772129/ 2>/dev/null && \
+            terraform import -auto-approve 'module.s3_buckets.aws_s3_bucket.logs' contexq-dev-logs-119287772129 || echo "ℹ️ logs bucket not found in AWS"
+          
+          aws s3 ls s3://contexq-dev-mwaa-dags-119287772129/ 2>/dev/null && \
+            terraform import -auto-approve aws_s3_bucket.mwaa_dags contexq-dev-mwaa-dags-119287772129 || echo "ℹ️ mwaa_dags bucket not found in AWS"
+          
+          echo "✅ S3 bucket imports completed"
+
       - name: Plan Terraform infrastructure
         id: tf_plan
         run: |
