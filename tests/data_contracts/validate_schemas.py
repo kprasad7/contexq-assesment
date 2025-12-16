@@ -30,10 +30,10 @@ def validate_schemas():
             payment_value=50000.00,
             order_status="delivered"
         )
-        print("✅ Source data schema valid")
+        print(" Source data schema valid")
         print(f"   - Fields: {source.schema()['properties'].keys()}")
     except Exception as e:
-        print(f"❌ Source data schema invalid: {e}")
+        print(f" Source data schema invalid: {e}")
         return False
     
     # Test Prepared Data Schema
@@ -49,10 +49,10 @@ def validate_schemas():
             activity_places=50,
             transaction_count=1000
         )
-        print("✅ Prepared data schema valid")
+        print(" Prepared data schema valid")
         print(f"   - Required fields: {[f for f in prepared.schema()['required']]}")
     except Exception as e:
-        print(f"❌ Prepared data schema invalid: {e}")
+        print(f" Prepared data schema invalid: {e}")
         return False
     
     # Test ML Feature Schema
@@ -66,10 +66,10 @@ def validate_schemas():
             activity_places=50,
             label=1
         )
-        print("✅ ML feature schema valid")
+        print(" ML feature schema valid")
         print(f"   - Label values: [0, 1]")
     except Exception as e:
-        print(f"❌ ML feature schema invalid: {e}")
+        print(f" ML feature schema invalid: {e}")
         return False
     
     # Test schema constraints
@@ -84,10 +84,10 @@ def validate_schemas():
             payment_value=-1000.00,  # Invalid
             order_status="delivered"
         )
-        print("❌ Negative payment should be rejected")
+        print(" Negative payment should be rejected")
         return False
     except Exception:
-        print("✅ Negative payment correctly rejected")
+        print(" Negative payment correctly rejected")
     
     # Test invalid state code
     try:
@@ -101,10 +101,10 @@ def validate_schemas():
             activity_places=50,
             transaction_count=1000
         )
-        print("❌ Invalid state should be rejected")
+        print(" Invalid state should be rejected")
         return False
     except Exception:
-        print("✅ Invalid state correctly rejected")
+        print(" Invalid state correctly rejected")
     
     # Test invalid label
     try:
@@ -116,13 +116,13 @@ def validate_schemas():
             activity_places=50,
             label=5  # Invalid
         )
-        print("❌ Invalid label should be rejected")
+        print(" Invalid label should be rejected")
         return False
     except Exception:
-        print("✅ Invalid label correctly rejected")
+        print(" Invalid label correctly rejected")
     
     print("\n" + "=" * 60)
-    print("✅ ALL SCHEMA VALIDATIONS PASSED")
+    print(" ALL SCHEMA VALIDATIONS PASSED")
     print("=" * 60)
     
     return True
@@ -175,7 +175,7 @@ def validate_quality_metrics():
     print(f"   - Passed: {gold_metrics['passed']}")
     
     print("\n" + "=" * 60)
-    print("✅ DATA QUALITY VALIDATION COMPLETE")
+    print(" DATA QUALITY VALIDATION COMPLETE")
     print("=" * 60)
 
 

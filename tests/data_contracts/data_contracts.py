@@ -229,9 +229,9 @@ def test_contracts():
     
     try:
         SourceDataContract(**valid_source)
-        print("✅ Source data contract validation passed")
+        print(" Source data contract validation passed")
     except Exception as e:
-        print(f"❌ Source data contract validation failed: {e}")
+        print(f" Source data contract validation failed: {e}")
     
     # Test prepared data contract
     valid_prepared = {
@@ -247,9 +247,9 @@ def test_contracts():
     
     try:
         PreparedDataContract(**valid_prepared)
-        print("✅ Prepared data contract validation passed")
+        print(" Prepared data contract validation passed")
     except Exception as e:
-        print(f"❌ Prepared data contract validation failed: {e}")
+        print(f" Prepared data contract validation failed: {e}")
     
     # Test ML feature contract
     valid_ml_features = {
@@ -263,9 +263,9 @@ def test_contracts():
     
     try:
         MLFeatureContract(**valid_ml_features)
-        print("✅ ML feature contract validation passed")
+        print(" ML feature contract validation passed")
     except Exception as e:
-        print(f"❌ ML feature contract validation failed: {e}")
+        print(f" ML feature contract validation failed: {e}")
     
     # Test invalid data
     invalid_prepared = {
@@ -281,9 +281,9 @@ def test_contracts():
     
     try:
         PreparedDataContract(**invalid_prepared)
-        print("❌ Invalid data should have been rejected")
+        print(" Invalid data should have been rejected")
     except Exception as e:
-        print(f"✅ Invalid data correctly rejected: {e}")
+        print(f" Invalid data correctly rejected: {e}")
 
 
 if __name__ == "__main__":

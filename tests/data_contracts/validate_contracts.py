@@ -65,12 +65,12 @@ def validate_etl_transformation():
     print(f"   - Invalid records: {len(errors)}")
     
     if errors:
-        print("   ❌ Errors found:")
+        print("    Errors found:")
         for error in errors:
             print(f"      - {error}")
         return False
     else:
-        print("   ✅ All records valid")
+        print("    All records valid")
     
     # Validate transformations
     print("\n[2] Validating Transformation Rules")
@@ -84,29 +84,29 @@ def validate_etl_transformation():
         actual_margin = row['profit_margin']
         
         if abs(expected_margin - actual_margin) < 0.01:  # 1% tolerance
-            print(f"      ✅ Record {idx}: Margin correct ({actual_margin:.2%})")
+            print(f"       Record {idx}: Margin correct ({actual_margin:.2%})")
         else:
-            print(f"      ❌ Record {idx}: Margin mismatch ({actual_margin:.2%} vs {expected_margin:.2%})")
+            print(f"       Record {idx}: Margin mismatch ({actual_margin:.2%} vs {expected_margin:.2%})")
             return False
     
     # Rule 2: Revenue >= 0
     print("   [Rule 2] Non-negative Revenue")
     if (df['revenue'] >= 0).all():
-        print(f"      ✅ All revenue values non-negative")
+        print(f"       All revenue values non-negative")
     else:
-        print(f"      ❌ Found negative revenue")
+        print(f"       Found negative revenue")
         return False
     
     # Rule 3: State codes are 2-letter
     print("   [Rule 3] Valid State Codes")
     valid_states = df['state'].str.len() == 2
     if valid_states.all():
-        print(f"      ✅ All state codes are 2 letters: {df['state'].unique().tolist()}")
+        print(f"       All state codes are 2 letters: {df['state'].unique().tolist()}")
     else:
-        print(f"      ❌ Invalid state codes found")
+        print(f"       Invalid state codes found")
         return False
     
-    print("\n✅ ETL Transformation Validation Passed")
+    print("\n ETL Transformation Validation Passed")
     return True
 
 
@@ -161,12 +161,12 @@ def validate_ml_training_transformation():
     print(f"   - Invalid features: {len(errors)}")
     
     if errors:
-        print("   ❌ Errors found:")
+        print("    Errors found:")
         for error in errors:
             print(f"      - {error}")
         return False
     else:
-        print("   ✅ All features valid")
+        print("    All features valid")
     
     # Validate feature statistics
     print("\n[2] Validating Feature Statistics")
@@ -180,9 +180,9 @@ def validate_ml_training_transformation():
     print(f"      - Class 1 (High Profit): {label_dist.get(1, 0)} records ({label_dist.get(1, 0)/len(df)*100:.1f}%)")
     
     if len(label_dist) < 2:
-        print("      ⚠️ Warning: Only one class present")
+        print("       Warning: Only one class present")
     else:
-        print("      ✅ Both classes present")
+        print("       Both classes present")
     
     # Check revenue range
     print("   [Stat 2] Revenue Range")
@@ -208,17 +208,17 @@ def validate_ml_training_transformation():
     
     # Profit should correlate with high profit label
     if (df[df['label'] == 1]['profit'].mean() > df[df['label'] == 0]['profit'].mean()):
-        print(f"      ✅ Profit correlates with high_profit label")
+        print(f"       Profit correlates with high_profit label")
     else:
-        print(f"      ⚠️ Profit does not correlate as expected")
+        print(f"       Profit does not correlate as expected")
     
     # Profit margin should correlate with high profit label
     if (df[df['label'] == 1]['profit_margin'].mean() > df[df['label'] == 0]['profit_margin'].mean()):
-        print(f"      ✅ Profit margin correlates with high_profit label")
+        print(f"       Profit margin correlates with high_profit label")
     else:
-        print(f"      ⚠️ Profit margin does not correlate as expected")
+        print(f"       Profit margin does not correlate as expected")
     
-    print("\n✅ ML Training Transformation Validation Passed")
+    print("\n ML Training Transformation Validation Passed")
     return True
 
 
@@ -240,12 +240,12 @@ def validate_data_integrity():
     extra_ml = ml_ids - etl_ids
     
     if not missing_ml and not extra_ml:
-        print("   ✅ All ETL records included in ML features")
+        print("    All ETL records included in ML features")
     else:
         if missing_ml:
-            print(f"   ❌ Missing in ML features: {missing_ml}")
+            print(f"    Missing in ML features: {missing_ml}")
         if extra_ml:
-            print(f"   ❌ Extra in ML features: {extra_ml}")
+            print(f"    Extra in ML features: {extra_ml}")
         return False
     
     # Test data completeness
@@ -264,9 +264,9 @@ def validate_data_integrity():
     print(f"   - Null values: {null_pct:.1f}%")
     
     if null_pct == 0:
-        print("   ✅ No missing values in critical fields")
+        print("   No missing values in critical fields")
     else:
-        print(f"   ⚠️ {null_pct:.1f}% missing data")
+        print(f"   {null_pct:.1f}% missing data")
     
     # Test uniqueness
     print("\n[3] Uniqueness Constraints")
@@ -274,12 +274,12 @@ def validate_data_integrity():
     duplicate_ids = df['corporate_id'].duplicated().sum()
     
     if duplicate_ids == 0:
-        print("   ✅ All corporate_ids are unique")
+        print("    All corporate_ids are unique")
     else:
-        print(f"   ❌ Found {duplicate_ids} duplicate IDs")
+        print(f"    Found {duplicate_ids} duplicate IDs")
         return False
     
-    print("\n✅ Data Integrity Validation Passed")
+    print("\n Data Integrity Validation Passed")
     return True
 
 
@@ -292,9 +292,9 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 60)
     if success:
-        print("✅ ALL TRANSFORMATION VALIDATIONS PASSED")
+        print(" ALL TRANSFORMATION VALIDATIONS PASSED")
     else:
-        print("❌ SOME VALIDATIONS FAILED")
+        print(" SOME VALIDATIONS FAILED")
     print("=" * 60)
     
     sys.exit(0 if success else 1)

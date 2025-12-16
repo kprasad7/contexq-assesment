@@ -53,10 +53,10 @@ def validate_source_data(**context):
     
     logger.info(f"Validating {len(files)} source files in S3://{bucket}/...")
     for file in files:
-        logger.info(f"  ✓ {file}")
+        logger.info(f"   {file}")
     
     context['task_instance'].xcom_push(key='source_files', value=files)
-    logger.info("✓ Source data validation complete")
+    logger.info(" Source data validation complete")
 
 
 # Task 1: Data Ingestion Validation
@@ -132,15 +132,15 @@ def validate_pipeline_completion(**context):
    
     logger.info("Task 5: Pipeline Completion - Validation & MLflow Registry ")
     
-    logger.info("\n✓ PIPELINE EXECUTION SUMMARY:")
-    logger.info("  1. ✓ Data ingestion validated")
-    logger.info("  2. ✓ Data sources prepared (supply chain + financial)")
-    logger.info("  3. ✓ ETL job completed (entity resolution, deduplication)")
-    logger.info("  4. ✓ Iceberg MERGE completed (corporate_registry updated)")
-    logger.info("  5. ✓ ML model training completed (profit prediction)")
-    logger.info("  6. ✓ MLflow model registration completed")
+    logger.info("\n PIPELINE EXECUTION SUMMARY:")
+    logger.info("  1.  Data ingestion validated")
+    logger.info("  2. Data sources prepared (supply chain + financial)")
+    logger.info("  3. ETL job completed (entity resolution, deduplication)")
+    logger.info("  4.  Iceberg MERGE completed (corporate_registry updated)")
+    logger.info("  5.  ML model training completed (profit prediction)")
+    logger.info("  6. MLflow model registration completed")
     
-    logger.info("\n✓ DATA PIPELINE COMPLETE")
+    logger.info("\n DATA PIPELINE COMPLETE")
     logger.info("  - Corporate registry: Ready for queries")
     logger.info("  - ML model: Deployed to MLflow")
     logger.info("  - Next execution: In 6 hours")
