@@ -65,15 +65,12 @@ jobs:
           echo "Target bucket: $RAW_DATA_BUCKET"
           
           # Try to upload scripts - will succeed if bucket exists, skip if not yet created
-          aws s3 cp src/spark/etl_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py 2>/dev/null || \
+          aws s3 cp src/spark/comprehensive_etl_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/comprehensive_etl_job.py 2>/dev/null || \
             echo "ℹ️ Spark jobs will be uploaded after Terraform creates buckets"
           
           aws s3 cp src/spark/ml_training_job.py \
             s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py 2>/dev/null || true
-          
-          aws s3 cp src/spark/data_preparation_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py 2>/dev/null || true
 
       - name: Validate Terraform
         run: |
@@ -122,17 +119,17 @@ jobs:
             exit 1
           fi
           
-          # Upload ETL job
-          aws s3 cp src/spark/etl_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py
+          # Upload comprehensive ETL job
+          aws s3 cp src/spark/comprehensive_etl_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/comprehensive_etl_job.py
           
           # Upload ML training job
           aws s3 cp src/spark/ml_training_job.py \
             s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
           
-          # Upload data preparation job
-          aws s3 cp src/spark/data_preparation_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py
+          # Clean up old job scripts if they exist
+          aws s3 rm s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py 2>/dev/null || true
+          aws s3 rm s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py 2>/dev/null || true
           
           echo "✅ Spark jobs uploaded successfully"
 
