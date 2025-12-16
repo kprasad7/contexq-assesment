@@ -1,0 +1,121 @@
+{
+  "cloudwatch_log_group_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:logs:us-east-1:119287772129:log-group:/aws/glue/contexq-dev-etl"
+  },
+  "cloudwatch_log_group_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "/aws/glue/contexq-dev-etl"
+  },
+  "glue_database_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:glue:us-east-1:119287772129:catalog"
+  },
+  "glue_database_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq_dev"
+  },
+  "glue_job_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:glue:us-east-1:119287772129:job/contexq-dev-etl"
+  },
+  "glue_job_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq-dev-etl"
+  },
+  "glue_service_role_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:iam::119287772129:role/contexq-dev-glue-service-role"
+  },
+  "glue_service_role_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq-dev-glue-service-role"
+  },
+  "iceberg_table_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:glue:us-east-1:119287772129:table/contexq_dev/corporate_registry"
+  },
+  "iceberg_table_location": {
+    "sensitive": false,
+    "type": "string",
+    "value": "s3://contexq-dev-processed-data-119287772129/warehouse/corporate_registry/"
+  },
+  "iceberg_table_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "corporate_registry"
+  },
+  "infrastructure_summary": {
+    "sensitive": false,
+    "type": [
+      "object",
+      {
+        "account_id": "string",
+        "deployment_date": "string",
+        "environment": "string",
+        "name_prefix": "string",
+        "project": "string",
+        "region": "string",
+        "terraform_version": "string"
+      }
+    ],
+    "value": {
+      "account_id": "119287772129",
+      "deployment_date": "2025-12-16T18:54:31Z",
+      "environment": "dev",
+      "name_prefix": "contexq-dev",
+      "project": "contexq",
+      "region": "us-east-1",
+      "terraform_version": "1.5.0"
+    }
+  },
+  "kms_key_arn": {
+    "sensitive": true,
+    "type": "string",
+    "value": "N/A"
+  },
+  "kms_key_id": {
+    "sensitive": true,
+    "type": "string",
+    "value": "N/A"
+  },
+  "s3_mlflow_bucket_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:s3:::contexq-dev-mlflow-artifacts-119287772129"
+  },
+  "s3_mlflow_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq-dev-mlflow-artifacts-119287772129"
+  },
+  "s3_processed_bucket_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:s3:::contexq-dev-processed-data-119287772129"
+  },
+  "s3_processed_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq-dev-processed-data-119287772129"
+  },
+  "s3_raw_bucket_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:s3:::contexq-dev-raw-data-119287772129"
+  },
+  "s3_raw_bucket_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "contexq-dev-raw-data-119287772129"
+  }
+}
