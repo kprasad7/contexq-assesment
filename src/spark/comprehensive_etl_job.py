@@ -90,15 +90,18 @@ except Exception as e:
 
 logger.info("\n[5/8] Creating corporate entities...")
 try:
+    # Drop seller_id from seller_sales to avoid ambiguity in join
+    seller_sales_clean = seller_sales.drop("seller_id")
+    
     corporate_df = sellers_df.join(
-        seller_sales,
-        on=sellers_df.seller_id == seller_sales.seller_id,
+        seller_sales_clean,
+        on=sellers_df.seller_id == seller_sales_clean.seller_id,
         how="left"
     ).select(
-        col("seller_id").alias("corporate_id"),
-        col("seller_city").alias("corporate_name"),
-        col("seller_city").alias("city"),
-        col("seller_state").alias("state"),
+        sellers_df.seller_id.alias("corporate_id"),
+        sellers_df.seller_city.alias("corporate_name"),
+        sellers_df.seller_city.alias("city"),
+        sellers_df.seller_state.alias("state"),
         col("total_sales_value"),
         col("total_freight_value"),
         col("num_orders"),
