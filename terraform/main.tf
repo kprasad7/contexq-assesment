@@ -60,7 +60,7 @@ module "glue_jobs" {
   python_version  = local.glue_config.python_version
 
   # S3 Paths
-  script_location = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/"
+  script_location = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/etl_job.py"
   temp_dir        = "s3://${module.s3_buckets.raw_bucket_name}/glue-temp/"
 
   # Glue Catalog
