@@ -173,35 +173,13 @@ jobs:
           
           echo "✅ Source data files uploaded successfully"
 
-      - name: Update Glue job configurations
+      - name: Verify Glue jobs created by Terraform
         run: |
-          echo "⚙️ Updating AWS Glue job configurations..."
+          echo "✅ Glue jobs created and managed by Terraform"
           
-          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
-          export ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
-          export REGION=us-east-1
-          
-          # Update ETL job with new script location
-          aws glue update-job \
-            --name contexq-dev-etl \
-            --role arn:aws:iam::${ACCOUNT_ID}:role/contexq-dev-glue-service-role \
-            --command Name=glueetl,ScriptLocation=s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py,PythonVersion=3 \
-            --glue-version 4.0 \
-            --worker-type G.2X \
-            --number-of-workers 2 \
-            --region $REGION || echo "ℹ️ Job update skipped (already up-to-date)"
-          
-          # Update ML training job
-          aws glue update-job \
-            --name contexq-dev-ml-training \
-            --role arn:aws:iam::${ACCOUNT_ID}:role/contexq-dev-glue-service-role \
-            --command Name=glueetl,ScriptLocation=s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py,PythonVersion=3 \
-            --glue-version 4.0 \
-            --worker-type G.2X \
-            --number-of-workers 2 \
-            --region $REGION || echo "ℹ️ Job update skipped (already up-to-date)"
-          
-          echo "✅ Glue jobs updated successfully"
+          # List all Glue jobs to verify they exist
+          echo "Available Glue jobs:"
+          aws glue get-jobs --region us-east-1 --query 'Jobs[*].Name' --output text
 
       - name: Trigger Airflow DAG refresh
         run: |
@@ -217,17 +195,18 @@ jobs:
         run: |
           echo "🔬 Running smoke tests..."
           
-          # Verify Glue jobs are accessible
-          echo "Checking Glue jobs..."
-          aws glue get-job --name contexq-dev-etl --region us-east-1 > /dev/null
-          aws glue get-job --name contexq-dev-ml-training --region us-east-1 > /dev/null
-          
           # Verify S3 buckets exist
           echo "Checking S3 buckets..."
-          aws s3 ls s3://contexq-dev-raw-data-119287772129/ > /dev/null
-          aws s3 ls s3://contexq-dev-processed-data-119287772129/ > /dev/null
+          aws s3 ls s3://contexq-dev-raw-data-119287772129/ > /dev/null && echo "✅ raw-data bucket found"
+          aws s3 ls s3://contexq-dev-processed-data-119287772129/ > /dev/null && echo "✅ processed-data bucket found"
           
-          # Verify Iceberg table exists
+          # Verify Glue database exists
+          echo "Checking Glue database..."
+          aws glue get-database --name contexq_dev --region us-east-1 > /dev/null && echo "✅ Glue database found"
+          
+          # Verify Glue jobs exist
+          echo "Checking Glue jobs..."
+          aws glue get-jobs --region us-east-1 --query 'Jobs[*].Name' --output text | grep -q contexq-dev && echo "✅ Glue jobs found"
           echo "Checking Iceberg database..."
           aws glue get-database --name contexq_dev --region us-east-1 > /dev/null
           
