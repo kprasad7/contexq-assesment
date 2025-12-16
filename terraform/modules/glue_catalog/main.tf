@@ -4,6 +4,14 @@ resource "aws_glue_catalog_database" "main" {
   catalog_id  = var.account_id
 
   tags = var.tags
+
+  # Don't delete the database when destroying this resource
+  # to preserve data in case of accidental destruction
+  skip_deletion = true
+
+  lifecycle {
+    ignore_changes = [tags]
+  }
 }
 
 resource "aws_glue_catalog_table" "corporate_registry" {
