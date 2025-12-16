@@ -49,6 +49,11 @@ job.init(args['JOB_NAME'], args)
 SOURCE_BUCKET = args.get('source_bucket', 'contexq-dev-raw-data-119287772129')
 TARGET_BUCKET = args.get('target_bucket', 'contexq-dev-processed-data-119287772129')
 
+# Log startup parameters for debugging
+logger.info(f"✓ JOB_NAME: {args['JOB_NAME']}")
+logger.info(f"✓ SOURCE_BUCKET: {SOURCE_BUCKET}")
+logger.info(f"✓ TARGET_BUCKET: {TARGET_BUCKET}")
+
 # Iceberg table schema
 ICEBERG_SCHEMA = StructType([
     StructField("corporate_id", StringType(), False),

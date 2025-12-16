@@ -99,6 +99,16 @@ variable "temp_dir" {
   }
 }
 
+variable "source_bucket_name" {
+  description = "Source S3 bucket name"
+  type        = string
+}
+
+variable "target_bucket_name" {
+  description = "Target S3 bucket name"
+  type        = string
+}
+
 variable "database_name" {
   description = "Glue database name"
   type        = string

@@ -39,8 +39,8 @@ resource "aws_glue_job" "etl_job" {
     "--job-language"                     = "python"
 
     # Custom parameters for Glue job
-    "--source_bucket"         = replace(var.script_location, "/glue-scripts/", "")
-    "--target_bucket"         = replace(var.temp_dir, "/glue-temp/", "")
+    "--source_bucket"         = var.source_bucket_name
+    "--target_bucket"         = var.target_bucket_name
     "--database"              = var.database_name
     "--table"                 = var.table_name
     "--output-partition-keys" = "year,month"

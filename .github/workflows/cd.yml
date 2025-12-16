@@ -1,6 +1,6 @@
 name: CD - Deploy to AWS
 
-on:
+# Automated deployment pipeline for data infrastructure and Spark jobs
   push:
     branches:
       - main
