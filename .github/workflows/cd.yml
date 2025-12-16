@@ -58,19 +58,6 @@ jobs:
           terraform fmt -recursive
           echo "✅ Terraform validation passed"
 
-      - name: Import existing Glue resources
-        run: |
-          echo "📥 Importing existing Glue resources into Terraform state..."
-          cd terraform
-          terraform init
-          
-          # Import existing Glue database if it exists
-          aws glue get-database --name contexq_dev --region us-east-1 &>/dev/null && \
-            terraform import -auto-approve 'module.glue_catalog.aws_glue_catalog_database.main' contexq_dev || \
-            echo "ℹ️ Glue database not found or already imported"
-          
-          echo "✅ Glue resource imports completed"
-
       - name: Plan Terraform infrastructure
         id: tf_plan
         run: |
