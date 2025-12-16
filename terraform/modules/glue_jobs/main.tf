@@ -6,14 +6,14 @@ resource "aws_cloudwatch_log_group" "glue_jobs" {
   tags = var.tags
 }
 
-# Primary Glue ETL Job
+# Primary Glue ETL Job - Comprehensive pipeline (Data Prep → ETL → Data Quality)
 resource "aws_glue_job" "etl_job" {
   name         = var.job_name
   role_arn     = var.role_arn
   glue_version = var.glue_version
   timeout      = var.timeout_minutes
   max_retries  = var.max_retries
-  description  = "ETL job for corporate data harmonization and Iceberg merge"
+  description  = "Comprehensive ETL job for CSV preparation, entity resolution, harmonization, Iceberg merge, and data quality checks"
 
   worker_type       = var.worker_type
   number_of_workers = var.num_workers
@@ -45,50 +45,6 @@ resource "aws_glue_job" "etl_job" {
     "--table"                 = var.table_name
     "--output-partition-keys" = "year,month"
     "--catalog"               = "glue"
-  }
-
-  tags = var.tags
-
-  depends_on = [aws_cloudwatch_log_group.glue_jobs]
-}
-
-# Optional: Data Quality Job
-resource "aws_glue_job" "data_quality_job" {
-  name         = "${var.job_name}-dq"
-  role_arn     = var.role_arn
-  glue_version = var.glue_version
-  timeout      = var.timeout_minutes
-  max_retries  = 0
-  description  = "Data quality checks for corporate registry"
-
-  worker_type       = var.worker_type
-  number_of_workers = var.num_workers
-
-  command {
-    name            = "glueetl"
-    script_location = "${var.script_location}data-quality/"
-    python_version  = var.python_version
-  }
-
-  execution_property {
-    max_concurrent_runs = 1
-  }
-
-  default_arguments = {
-    "--job-bookmark-option"              = "job-bookmark-disable"
-    "--enable-continuous-cloudwatch-log" = "true"
-    "--enable-metrics"                   = "true"
-    "--TempDir"                          = var.temp_dir
-    "--database"                         = var.database_name
-    "--table"                            = var.table_name
-  }
-
-  tags = var.tags
-
-  depends_on = [aws_cloudwatch_log_group.glue_jobs]
-}
-
-# Trigger for scheduled execution (optional)
 resource "aws_glue_trigger" "etl_schedule" {
   name              = "${var.job_name}-scheduled"
   type              = "SCHEDULED"

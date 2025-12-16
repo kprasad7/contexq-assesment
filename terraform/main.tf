@@ -59,8 +59,8 @@ module "glue_jobs" {
   max_retries     = local.glue_config.max_retries
   python_version  = local.glue_config.python_version
 
-  # S3 Paths and Buckets
-  script_location    = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/etl_job.py"
+  # S3 Paths and Buckets - single unified job
+  script_location    = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/comprehensive_etl_job.py"
   temp_dir           = "s3://${module.s3_buckets.raw_bucket_name}/glue-temp/"
   source_bucket_name = module.s3_buckets.raw_bucket_name
   target_bucket_name = module.s3_buckets.processed_bucket_name
