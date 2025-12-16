@@ -39,6 +39,11 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.6.0
+
       - name: Validate Python syntax
         run: |
           python -m py_compile src/spark/*.py
