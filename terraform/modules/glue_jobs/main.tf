@@ -12,7 +12,6 @@ resource "aws_glue_job" "etl_job" {
   role_arn     = var.role_arn
   glue_version = var.glue_version
   timeout      = var.timeout_minutes
-  max_retries  = var.max_retries
   description  = "Comprehensive ETL job for CSV preparation, entity resolution, harmonization, Iceberg merge, and data quality checks"
 
   worker_type       = var.worker_type

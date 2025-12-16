@@ -265,31 +265,63 @@ def main():
             # Read CSV files from S3
             logger.info("Reading source datasets from S3...")
             
+            # Source 1: Sellers (corporate supply chain data)
             source1_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_sellers_dataset.csv"
             source1_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
                 .csv(source1_path)
-            logger.info(f"✓ Source 1 (supply): {source1_df.count():,} records")
+            logger.info(f"✓ Source 1 (sellers): {source1_df.count():,} records")
+            logger.info(f"  Columns: {source1_df.columns}")
             
+            # Source 2: Order Items (corporate financial data)  
             source2_path = f"s3://{SOURCE_BUCKET}/source_financial/olist_order_payments_dataset.csv"
             source2_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
                 .csv(source2_path)
-            logger.info(f"✓ Source 2 (financial): {source2_df.count():,} records")
+            logger.info(f"✓ Source 2 (payments): {source2_df.count():,} records")
+            logger.info(f"  Columns: {source2_df.columns}")
+            
+            # Prepare source 1: Create standardized corporate entity
+            source1_prepared = source1_df.withColumn("source_system", lit("SUPPLY_CHAIN")) \
+                .withColumn("corporate_id", when(col("seller_id").isNotNull(), col("seller_id")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("corporate_name", when(col("seller_state").isNotNull(), col("seller_state")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("state", col("seller_state")) \
+                .withColumn("address", lit(None).cast(StringType())) \
+                .withColumn("activity_places", lit(None).cast(IntegerType())) \
+                .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
+                .withColumn("main_customers", lit(None).cast(StringType())) \
+                .withColumn("revenue", lit(None).cast(DecimalType(18, 2))) \
+                .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
+                .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
+                        "top_suppliers", "main_customers", "revenue", "profit", "source_system")
+            
+            # Prepare source 2: Create standardized corporate entity from payments
+            source2_prepared = source2_df.withColumn("source_system", lit("FINANCIAL")) \
+                .withColumn("corporate_id", when(col("payment_type").isNotNull(), col("payment_type")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("corporate_name", when(col("payment_type").isNotNull(), col("payment_type")).otherwise(lit("UNKNOWN"))) \
+                .withColumn("state", lit(None).cast(StringType())) \
+                .withColumn("address", lit(None).cast(StringType())) \
+                .withColumn("activity_places", lit(None).cast(IntegerType())) \
+                .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
+                .withColumn("main_customers", lit(None).cast(StringType())) \
+                .withColumn("revenue", col("payment_value").cast(DecimalType(18, 2))) \
+                .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
+                .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
+                        "top_suppliers", "main_customers", "revenue", "profit", "source_system")
             
             # Save as Parquet for caching
             prep_supply_path = f"s3://{TARGET_BUCKET}/prepared_sources/source1_supply/"
-            source1_df.write.mode("overwrite").parquet(prep_supply_path)
+            source1_prepared.write.mode("overwrite").parquet(prep_supply_path)
             logger.info(f"✓ Supply source cached to {prep_supply_path}")
             
             prep_financial_path = f"s3://{TARGET_BUCKET}/prepared_sources/source2_financial/"
-            source2_df.write.mode("overwrite").parquet(prep_financial_path)
+            source2_prepared.write.mode("overwrite").parquet(prep_financial_path)
             logger.info(f"✓ Financial source cached to {prep_financial_path}")
             
         except Exception as e:
-            logger.error(f"✗ Data ingestion failed: {str(e)}", exc_info=True)
+            logger.error(f"✗ Data ingestion failed: {type(e).__name__}: {str(e)}", exc_info=True)
             raise
         
         # ============================================================
@@ -300,12 +332,9 @@ def main():
         try:
             entity_resolver = EntityResolutionEngine(spark)
             
-            source1_resolved = entity_resolver.resolve_duplicates(
-                source1_df.withColumn("source_system", lit("SUPPLY_CHAIN"))
-            )
-            source2_resolved = entity_resolver.resolve_duplicates(
-                source2_df.withColumn("source_system", lit("FINANCIAL"))
-            )
+            # Read prepared sources
+            source1_resolved = entity_resolver.resolve_duplicates(source1_prepared)
+            source2_resolved = entity_resolver.resolve_duplicates(source2_prepared)
             
             # Combine sources
             logger.info("Combining resolved sources...")
@@ -397,10 +426,17 @@ def main():
         return 0
         
     except Exception as e:
-        logger.error(f"✗ ETL job failed: {str(e)}", exc_info=True)
-        job.commit()
+        logger.error(f"✗ ETL job failed with exception: {type(e).__name__}", exc_info=True)
+        logger.error(f"Error message: {str(e)}")
+        try:
+            job.commit()
+        except:
+            pass
         return 1
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    exit_code = main()
+    if exit_code != 0:
+        logger.error(f"Job failed with exit code: {exit_code}")
+    sys.exit(exit_code)
