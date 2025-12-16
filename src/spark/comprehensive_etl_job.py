@@ -267,46 +267,87 @@ def main():
             
             # Source 1: Sellers (corporate supply chain data)
             source1_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_sellers_dataset.csv"
-            source1_df = spark.read \
+            sellers_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
                 .csv(source1_path)
-            logger.info(f"✓ Source 1 (sellers): {source1_df.count():,} records")
-            logger.info(f"  Columns: {source1_df.columns}")
+            logger.info(f"✓ Sellers: {sellers_df.count():,} records")
+            logger.info(f"  Columns: {sellers_df.columns}")
             
-            # Source 2: Order Items (corporate financial data)  
-            source2_path = f"s3://{SOURCE_BUCKET}/source_financial/olist_order_payments_dataset.csv"
-            source2_df = spark.read \
+            # Source 2: Order Items (link sellers to orders for revenue)
+            source2_path = f"s3://{SOURCE_BUCKET}/source_supply/olist_order_items_dataset.csv"
+            items_df = spark.read \
                 .option("header", "true") \
                 .option("inferSchema", "true") \
                 .csv(source2_path)
-            logger.info(f"✓ Source 2 (payments): {source2_df.count():,} records")
-            logger.info(f"  Columns: {source2_df.columns}")
+            logger.info(f"✓ Order Items: {items_df.count():,} records")
             
-            # Prepare source 1: Create standardized corporate entity
-            source1_prepared = source1_df.withColumn("source_system", lit("SUPPLY_CHAIN")) \
-                .withColumn("corporate_id", when(col("seller_id").isNotNull(), col("seller_id")).otherwise(lit("UNKNOWN"))) \
-                .withColumn("corporate_name", when(col("seller_state").isNotNull(), col("seller_state")).otherwise(lit("UNKNOWN"))) \
+            # Source 3: Payments (financial data)
+            source3_path = f"s3://{SOURCE_BUCKET}/source_financial/olist_order_payments_dataset.csv"
+            payments_df = spark.read \
+                .option("header", "true") \
+                .option("inferSchema", "true") \
+                .csv(source3_path)
+            logger.info(f"✓ Payments: {payments_df.count():,} records")
+            
+            # Aggregate revenue by order from payments
+            order_revenue = payments_df.groupBy("order_id") \
+                .agg({"payment_value": "sum"}) \
+                .withColumnRenamed("sum(payment_value)", "revenue_total")
+            
+            # Join order items with revenue
+            items_revenue = items_df.join(
+                order_revenue,
+                items_df.order_id == order_revenue.order_id,
+                "left"
+            )
+            
+            # Aggregate by seller to get total revenue
+            seller_metrics = items_revenue.groupBy("seller_id") \
+                .agg({
+                    "revenue_total": "sum",
+                    "price": "sum",
+                    "freight_value": "sum"
+                }) \
+                .withColumnRenamed("sum(revenue_total)", "total_revenue") \
+                .withColumnRenamed("sum(price)", "total_product_value") \
+                .withColumnRenamed("sum(freight_value)", "total_freight")
+            
+            # Join sellers with metrics
+            sellers_enriched = sellers_df.join(
+                seller_metrics,
+                sellers_df.seller_id == seller_metrics.seller_id,
+                "left"
+            )
+            
+            # Prepare source 1: Sellers enriched with revenue data
+            source1_prepared = sellers_enriched \
+                .withColumn("source_system", lit("SUPPLY_CHAIN")) \
+                .withColumn("corporate_id", col("seller_id")) \
+                .withColumn("corporate_name", col("seller_city")) \
                 .withColumn("state", col("seller_state")) \
-                .withColumn("address", lit(None).cast(StringType())) \
+                .withColumn("address", col("seller_zip_code_prefix")) \
                 .withColumn("activity_places", lit(None).cast(IntegerType())) \
                 .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
                 .withColumn("main_customers", lit(None).cast(StringType())) \
-                .withColumn("revenue", lit(None).cast(DecimalType(18, 2))) \
+                .withColumn("revenue", col("total_revenue").cast(DecimalType(18, 2))) \
                 .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
                 .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
                         "top_suppliers", "main_customers", "revenue", "profit", "source_system")
             
-            # Prepare source 2: Create standardized corporate entity from payments
-            source2_prepared = source2_df.withColumn("source_system", lit("FINANCIAL")) \
-                .withColumn("corporate_id", when(col("payment_type").isNotNull(), col("payment_type")).otherwise(lit("UNKNOWN"))) \
-                .withColumn("corporate_name", when(col("payment_type").isNotNull(), col("payment_type")).otherwise(lit("UNKNOWN"))) \
+            # Prepare source 2: Aggregate payment types as financial entities
+            source2_prepared = payments_df.groupBy("payment_type") \
+                .agg({"payment_value": "sum"}) \
+                .withColumnRenamed("sum(payment_value)", "total_payment_value") \
+                .withColumn("source_system", lit("FINANCIAL")) \
+                .withColumn("corporate_id", col("payment_type")) \
+                .withColumn("corporate_name", col("payment_type")) \
                 .withColumn("state", lit(None).cast(StringType())) \
                 .withColumn("address", lit(None).cast(StringType())) \
                 .withColumn("activity_places", lit(None).cast(IntegerType())) \
                 .withColumn("top_suppliers", lit(None).cast(ArrayType(StringType()))) \
                 .withColumn("main_customers", lit(None).cast(StringType())) \
-                .withColumn("revenue", col("payment_value").cast(DecimalType(18, 2))) \
+                .withColumn("revenue", col("total_payment_value").cast(DecimalType(18, 2))) \
                 .withColumn("profit", lit(None).cast(DecimalType(18, 2))) \
                 .select("corporate_id", "corporate_name", "address", "state", "activity_places", 
                         "top_suppliers", "main_customers", "revenue", "profit", "source_system")
@@ -314,11 +355,11 @@ def main():
             # Save as Parquet for caching
             prep_supply_path = f"s3://{TARGET_BUCKET}/prepared_sources/source1_supply/"
             source1_prepared.write.mode("overwrite").parquet(prep_supply_path)
-            logger.info(f"✓ Supply source cached to {prep_supply_path}")
+            logger.info(f"✓ Supply source cached: {source1_prepared.count():,} records")
             
             prep_financial_path = f"s3://{TARGET_BUCKET}/prepared_sources/source2_financial/"
             source2_prepared.write.mode("overwrite").parquet(prep_financial_path)
-            logger.info(f"✓ Financial source cached to {prep_financial_path}")
+            logger.info(f"✓ Financial source cached: {source2_prepared.count():,} records")
             
         except Exception as e:
             logger.error(f"✗ Data ingestion failed: {type(e).__name__}: {str(e)}", exc_info=True)
