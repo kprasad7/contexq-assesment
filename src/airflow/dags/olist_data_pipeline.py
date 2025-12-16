@@ -41,9 +41,8 @@ dag = DAG(
 
 def validate_source_data(**context):
     """Task 1: Validate source data availability in S3."""
-    logger.info("╔═══════════════════════════════════════════════════════════════╗")
-    logger.info("║  Task 1: Data Ingestion - Validate Source Data               ║")
-    logger.info("╚═══════════════════════════════════════════════════════════════╝")
+    
+    logger.info("Task 1: Data Ingestion - Validate Source Data")
     
     bucket = 'contexq-dev-raw-data-119287772129'
     files = [
@@ -130,9 +129,8 @@ task_ml_training = AwsGlueJobOperator(
 
 def validate_pipeline_completion(**context):
     """Task 5: Validate pipeline completion and log summary."""
-    logger.info("\n╔═══════════════════════════════════════════════════════════════╗")
-    logger.info("║  Task 5: Pipeline Completion - Validation & MLflow Registry  ║")
-    logger.info("╚═══════════════════════════════════════════════════════════════╝")
+   
+    logger.info("Task 5: Pipeline Completion - Validation & MLflow Registry ")
     
     logger.info("\n✓ PIPELINE EXECUTION SUMMARY:")
     logger.info("  1. ✓ Data ingestion validated")

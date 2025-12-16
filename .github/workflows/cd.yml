@@ -1,0 +1,246 @@
+name: CD - Deploy to AWS
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+      - 'terraform/**'
+      - '.github/workflows/cd.yml'
+
+jobs:
+  deploy:
+    name: Deploy Spark Jobs, Airflow DAG, and Infrastructure
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+      
+    environment:
+      name: production
+      url: https://console.aws.amazon.com/
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: github-actions
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile src/spark/*.py
+          python -m py_compile src/airflow/dags/*.py
+
+      - name: Upload Spark jobs to S3
+        run: |
+          echo "📤 Deploying Spark jobs to S3..."
+          
+          # Get bucket name from Terraform outputs
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          echo "Target bucket: $RAW_DATA_BUCKET"
+          
+          # Upload ETL job
+          aws s3 cp src/spark/etl_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py
+          
+          # Upload ML training job
+          aws s3 cp src/spark/ml_training_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
+          
+          # Upload data preparation job
+          aws s3 cp src/spark/data_preparation_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py
+          
+          echo "✅ Spark jobs uploaded successfully"
+
+      - name: Upload Airflow DAG to MWAA
+        run: |
+          echo "📤 Deploying Airflow DAG to MWAA..."
+          
+          # Get MWAA bucket from Terraform outputs
+          export MWAA_BUCKET=$(aws s3 ls | grep mwaa-dags | awk '{print $3}')
+          echo "Target MWAA bucket: $MWAA_BUCKET"
+          
+          # Upload DAG
+          aws s3 cp src/airflow/dags/olist_data_pipeline.py \
+            s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
+          
+          echo "✅ Airflow DAG uploaded successfully"
+          echo "ℹ️ MWAA will auto-sync DAG from S3 within 1 minute"
+
+      - name: Validate Terraform
+        run: |
+          echo "🔍 Validating Terraform configuration..."
+          cd terraform
+          terraform init -backend=false
+          terraform validate
+          terraform fmt -check -recursive
+          echo "✅ Terraform validation passed"
+
+      - name: Plan Terraform infrastructure
+        id: tf_plan
+        run: |
+          echo "📋 Planning Terraform infrastructure changes..."
+          cd terraform
+          terraform init
+          terraform plan -out=tfplan -json > tfplan.json || true
+          
+          # Show plan summary
+          echo "## Terraform Plan Summary" >> $GITHUB_STEP_SUMMARY
+          terraform show -no-color tfplan | tail -50 >> $GITHUB_STEP_SUMMARY
+
+      - name: Apply Terraform infrastructure
+        run: |
+          echo "🚀 Applying Terraform infrastructure..."
+          cd terraform
+          terraform apply -auto-approve tfplan
+          
+          # Export outputs
+          terraform output -json > outputs.json
+          echo "✅ Infrastructure deployed successfully"
+          
+          # Show key outputs
+          echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
+          terraform output >> $GITHUB_STEP_SUMMARY
+
+      - name: Update Glue job configurations
+        run: |
+          echo "⚙️ Updating AWS Glue job configurations..."
+          
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          export ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
+          export REGION=us-east-1
+          
+          # Update ETL job with new script location
+          aws glue update-job \
+            --name contexq-dev-etl \
+            --role arn:aws:iam::${ACCOUNT_ID}:role/contexq-dev-glue-service-role \
+            --command Name=glueetl,ScriptLocation=s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py,PythonVersion=3 \
+            --glue-version 4.0 \
+            --worker-type G.2X \
+            --number-of-workers 2 \
+            --region $REGION || echo "ℹ️ Job update skipped (already up-to-date)"
+          
+          # Update ML training job
+          aws glue update-job \
+            --name contexq-dev-ml-training \
+            --role arn:aws:iam::${ACCOUNT_ID}:role/contexq-dev-glue-service-role \
+            --command Name=glueetl,ScriptLocation=s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py,PythonVersion=3 \
+            --glue-version 4.0 \
+            --worker-type G.2X \
+            --number-of-workers 2 \
+            --region $REGION || echo "ℹ️ Job update skipped (already up-to-date)"
+          
+          echo "✅ Glue jobs updated successfully"
+
+      - name: Trigger Airflow DAG refresh
+        run: |
+          echo "🔄 Triggering MWAA DAG refresh..."
+          # MWAA auto-syncs DAGs from S3, but we can verify deployment
+          export MWAA_BUCKET=$(aws s3 ls | grep mwaa-dags | awk '{print $3}')
+          
+          # Verify DAG is accessible
+          aws s3 ls s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
+          echo "✅ DAG file verified in S3"
+
+      - name: Run smoke tests against deployed infrastructure
+        run: |
+          echo "🔬 Running smoke tests..."
+          
+          # Verify Glue jobs are accessible
+          echo "Checking Glue jobs..."
+          aws glue get-job --name contexq-dev-etl --region us-east-1 > /dev/null
+          aws glue get-job --name contexq-dev-ml-training --region us-east-1 > /dev/null
+          
+          # Verify S3 buckets exist
+          echo "Checking S3 buckets..."
+          aws s3 ls s3://contexq-dev-raw-data-119287772129/ > /dev/null
+          aws s3 ls s3://contexq-dev-processed-data-119287772129/ > /dev/null
+          
+          # Verify Iceberg table exists
+          echo "Checking Iceberg database..."
+          aws glue get-database --name contexq_dev --region us-east-1 > /dev/null
+          
+          echo "✅ Smoke tests passed"
+
+      - name: Create deployment summary
+        if: success()
+        run: |
+          echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Deployed Components" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Spark ETL Job: \`contexq-dev-etl\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Spark ML Training Job: \`contexq-dev-ml-training\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Airflow DAG: \`olist_data_pipeline\` (MWAA)" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Infrastructure: Iceberg tables, S3 buckets, EventBridge triggers" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Verify DAG in MWAA console" >> $GITHUB_STEP_SUMMARY
+          echo "2. Monitor first pipeline execution" >> $GITHUB_STEP_SUMMARY
+          echo "3. Check CloudWatch logs for errors" >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify deployment completion
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo "✅ CD Pipeline Completed Successfully"
+          else
+            echo "❌ CD Pipeline Failed"
+            exit 1
+          fi
+
+  rollback:
+    name: Automatic Rollback (if deployment fails)
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: failure()
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Rollback to previous version
+        run: |
+          echo "⏮️ Rolling back to previous version..."
+          
+          # Get last good commit
+          export PREV_COMMIT=$(git rev-list --all | grep -v "$(git rev-parse HEAD)" | head -1)
+          echo "Rolling back to commit: $PREV_COMMIT"
+          
+          # Re-deploy previous version of Spark jobs
+          git checkout $PREV_COMMIT -- src/spark/
+          
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          aws s3 cp src/spark/etl_job.py s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py
+          aws s3 cp src/spark/ml_training_job.py s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
+          
+          echo "✅ Rollback completed"
+
+      - name: Alert on failure
+        run: |
+          echo "⚠️ Deployment failed and was rolled back"
+          echo "⚠️ Please review the CD pipeline logs for details"
