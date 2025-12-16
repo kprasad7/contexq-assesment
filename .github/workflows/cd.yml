@@ -49,6 +49,31 @@ jobs:
           python -m py_compile src/spark/*.py
           python -m py_compile src/airflow/dags/*.py
 
+      - name: Upload Spark jobs to S3
+        run: |
+          echo "📤 Pre-deploying Spark jobs to S3..."
+          
+          # Get bucket name from AWS S3 listing (or create temp reference)
+          export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
+          
+          if [ -z "$RAW_DATA_BUCKET" ]; then
+            echo "ℹ️ raw-data bucket doesn't exist yet (will be created by Terraform)"
+            export RAW_DATA_BUCKET="contexq-dev-raw-data-119287772129"
+          fi
+          
+          echo "Target bucket: $RAW_DATA_BUCKET"
+          
+          # Try to upload scripts - will succeed if bucket exists, skip if not yet created
+          aws s3 cp src/spark/etl_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/etl_job.py 2>/dev/null || \
+            echo "ℹ️ Spark jobs will be uploaded after Terraform creates buckets"
+          
+          aws s3 cp src/spark/ml_training_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py 2>/dev/null || true
+          
+          aws s3 cp src/spark/data_preparation_job.py \
+            s3://${RAW_DATA_BUCKET}/glue-scripts/data_preparation_job.py 2>/dev/null || true
+
       - name: Validate Terraform
         run: |
           echo "🔍 Validating Terraform configuration..."
@@ -84,16 +109,15 @@ jobs:
           echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
           terraform output >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload Spark jobs to S3
+      - name: Upload Spark jobs to S3 (post-Terraform)
         run: |
-          echo "📤 Deploying Spark jobs to S3..."
+          echo "📤 Uploading Spark job scripts to S3 (after infrastructure created)..."
           
-          # Get bucket name from AWS S3 listing
           export RAW_DATA_BUCKET=$(aws s3 ls | grep raw-data | awk '{print $3}')
           echo "Target bucket: $RAW_DATA_BUCKET"
           
           if [ -z "$RAW_DATA_BUCKET" ]; then
-            echo "❌ Error: Could not find raw-data bucket"
+            echo "❌ Error: Could not find raw-data bucket after Terraform apply"
             exit 1
           fi
           

@@ -47,10 +47,6 @@ module "iam_roles" {
 }
 
 # Module: Glue Jobs
-# Note: Glue jobs are created and deployed via GitHub Actions CI/CD pipeline
-# They are uploaded to S3 and managed through the workflow
-# Uncomment this module if you want to manage jobs via Terraform
-/*
 module "glue_jobs" {
   source = "./modules/glue_jobs"
 
@@ -64,8 +60,8 @@ module "glue_jobs" {
   python_version  = local.glue_config.python_version
 
   # S3 Paths
-  script_location = "s3://${module.s3_buckets.processed_bucket_name}/glue-scripts/"
-  temp_dir        = "s3://${module.s3_buckets.processed_bucket_name}/glue-temp/"
+  script_location = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/"
+  temp_dir        = "s3://${module.s3_buckets.raw_bucket_name}/glue-temp/"
 
   # Glue Catalog
   database_name = local.glue_config.database_name
@@ -79,4 +75,3 @@ module "glue_jobs" {
 
   depends_on = [module.iam_roles, module.glue_catalog]
 }
-*/
