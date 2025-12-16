@@ -45,6 +45,14 @@ resource "aws_glue_job" "etl_job" {
     "--table"                 = var.table_name
     "--output-partition-keys" = "year,month"
     "--catalog"               = "glue"
+  }
+
+  tags = var.tags
+
+  depends_on = [aws_cloudwatch_log_group.glue_jobs]
+}
+
+# Trigger for scheduled execution (optional)
 resource "aws_glue_trigger" "etl_schedule" {
   name              = "${var.job_name}-scheduled"
   type              = "SCHEDULED"

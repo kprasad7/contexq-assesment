@@ -13,16 +13,6 @@ output "job_id" {
   value       = aws_glue_job.etl_job.id
 }
 
-output "dq_job_name" {
-  description = "Name of the data quality Glue job"
-  value       = aws_glue_job.data_quality_job.name
-}
-
-output "dq_job_arn" {
-  description = "ARN of the data quality job"
-  value       = aws_glue_job.data_quality_job.arn
-}
-
 output "log_group_name" {
   description = "CloudWatch log group name"
   value       = aws_cloudwatch_log_group.glue_jobs.name
