@@ -241,10 +241,17 @@ def _get_spark_and_args() -> tuple[SparkSession, dict[str, Any], Any | None]:
 
 
 def _configure_iceberg_glue_catalog(spark: SparkSession, warehouse_s3: str) -> None:
-	"""Configure Spark session for Iceberg using AWS Glue Catalog."""
-	spark.conf.set("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-	spark.conf.set("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog")
-	spark.conf.set("spark.sql.catalog.glue_catalog.catalog-impl", "org.apache.iceberg.aws.glue.GlueCatalog")
+	"""Configure Spark session for Iceberg using AWS Glue Catalog.
+	
+	Note: Static configs (spark.sql.extensions, catalog-impl) are set via Glue job --conf parameters.
+	Only dynamic runtime configs are set here.
+	"""
+	# Static configs already set via Glue job parameters:
+	# - spark.sql.extensions
+	# - spark.sql.catalog.glue_catalog
+	# - spark.sql.catalog.glue_catalog.catalog-impl
+	
+	# Set runtime-configurable options
 	spark.conf.set("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
 	spark.conf.set("spark.sql.catalog.glue_catalog.warehouse", warehouse_s3)
 	spark.conf.set("spark.sql.defaultCatalog", "glue_catalog")

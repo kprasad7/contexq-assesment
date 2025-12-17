@@ -37,6 +37,9 @@ resource "aws_glue_job" "etl_job" {
     "--enable-metrics"                   = "true"
     "--TempDir"                          = var.temp_dir
     "--job-language"                     = "python"
+    
+    # Iceberg configuration (must be set before Spark session creation)
+    "--conf"                             = "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions --conf spark.sql.catalog.glue_catalog=org.apache.iceberg.spark.SparkCatalog --conf spark.sql.catalog.glue_catalog.catalog-impl=org.apache.iceberg.aws.glue.GlueCatalog"
 
     # Custom parameters for Glue job
     "--source_bucket"         = var.source_bucket_name
