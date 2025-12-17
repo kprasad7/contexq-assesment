@@ -43,8 +43,7 @@ jobs:
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: 1.6.0
-
+          terraform_version: 1.6.0          terraform_wrapper: false
       - name: Validate Python syntax
         run: |
           python -m py_compile src/spark/*.py
@@ -116,12 +115,12 @@ jobs:
         id: tf_outputs
         run: |
           cd terraform
-          echo "raw_bucket=$(terraform output -raw s3_raw_bucket_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
-          echo "processed_bucket=$(terraform output -raw s3_processed_bucket_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
-          echo "mwaa_bucket=$(terraform output -raw mwaa_dags_bucket 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
-          echo "etl_job=$(terraform output -raw glue_job_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
-          echo "ml_job=$(terraform output -raw glue_ml_training_job_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
-          echo "glue_db=$(terraform output -raw glue_database_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "raw_bucket=$(terraform output -raw s3_raw_bucket_name)" >> $GITHUB_OUTPUT
+          echo "processed_bucket=$(terraform output -raw s3_processed_bucket_name)" >> $GITHUB_OUTPUT
+          echo "mwaa_bucket=$(terraform output -raw mwaa_dags_bucket)" >> $GITHUB_OUTPUT
+          echo "etl_job=$(terraform output -raw glue_job_name)" >> $GITHUB_OUTPUT
+          echo "ml_job=$(terraform output -raw glue_ml_training_job_name)" >> $GITHUB_OUTPUT
+          echo "glue_db=$(terraform output -raw glue_database_name)" >> $GITHUB_OUTPUT
 
       - name: Upload Spark jobs to S3 (post-Terraform)
         run: |
