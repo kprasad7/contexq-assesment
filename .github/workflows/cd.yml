@@ -120,8 +120,8 @@ jobs:
           echo "📤 Uploading Spark job scripts to S3 (using Terraform outputs)..."
           cd terraform
           
-          # Get bucket name from Terraform output
-          export RAW_DATA_BUCKET=$(terraform output -raw s3_raw_bucket_name)
+          # Get bucket name from outputs.json (avoid GitHub Actions wrapper issues)
+          export RAW_DATA_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
           echo "Target bucket: $RAW_DATA_BUCKET"
           cd ..
           
@@ -145,8 +145,8 @@ jobs:
           echo "📤 Deploying Airflow DAG to MWAA..."
           cd terraform
           
-          # Get MWAA bucket from Terraform output
-          export MWAA_BUCKET=$(terraform output -raw mwaa_dags_bucket)
+          # Get MWAA bucket from outputs.json
+          export MWAA_BUCKET=$(cat outputs.json | jq -r '.mwaa_dags_bucket.value')
           echo "Target MWAA bucket: $MWAA_BUCKET"
           cd ..
           
@@ -167,7 +167,7 @@ jobs:
           echo "📥 Uploading source data files..."
           cd terraform
           
-          export RAW_DATA_BUCKET=$(terraform output -raw s3_raw_bucket_name)
+          export RAW_DATA_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
           cd ..
           
           # Upload source CSV files
@@ -187,9 +187,9 @@ jobs:
           echo "✅ Verifying Glue jobs created by Terraform..."
           cd terraform
           
-          # Get job names from Terraform outputs
-          export ETL_JOB=$(terraform output -raw glue_job_name)
-          export ML_JOB=$(terraform output -raw glue_ml_training_job_name)
+          # Get job names from outputs.json
+          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
+          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
           cd ..
           
           echo "Expected ETL job: $ETL_JOB"
@@ -205,7 +205,7 @@ jobs:
         run: |
           echo "🔄 Verifying MWAA DAG deployment..."
           cd terraform
-          export MWAA_BUCKET=$(terraform output -raw mwaa_dags_bucket)
+          export MWAA_BUCKET=$(cat outputs.json | jq -r '.mwaa_dags_bucket.value')
           cd ..
           
           # Verify DAG is accessible
@@ -217,12 +217,12 @@ jobs:
           echo "🔬 Running smoke tests..."
           cd terraform
           
-          # Get values from Terraform outputs
-          export RAW_BUCKET=$(terraform output -raw s3_raw_bucket_name)
-          export PROCESSED_BUCKET=$(terraform output -raw s3_processed_bucket_name)
-          export GLUE_DB=$(terraform output -raw glue_database_name)
-          export ETL_JOB=$(terraform output -raw glue_job_name)
-          export ML_JOB=$(terraform output -raw glue_ml_training_job_name)
+          # Get values from outputs.json
+          export RAW_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
+          export PROCESSED_BUCKET=$(cat outputs.json | jq -r '.s3_processed_bucket_name.value')
+          export GLUE_DB=$(cat outputs.json | jq -r '.glue_database_name.value')
+          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
+          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
           cd ..
           
           # Verify S3 buckets exist
@@ -249,9 +249,9 @@ jobs:
         if: success()
         run: |
           cd terraform
-          export ETL_JOB=$(terraform output -raw glue_job_name)
-          export ML_JOB=$(terraform output -raw glue_ml_training_job_name)
-          export GLUE_DB=$(terraform output -raw glue_database_name)
+          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
+          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
+          export GLUE_DB=$(cat outputs.json | jq -r '.glue_database_name.value')
           cd ..
           
           echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
@@ -306,7 +306,7 @@ jobs:
           # Rollback is handled by Terraform state management
           # For script rollback, get previous versions from S3 versioning
           cd terraform
-          export RAW_BUCKET=$(terraform output -raw s3_raw_bucket_name 2>/dev/null || echo "")
+          export RAW_BUCKET=$(cat outputs.json 2>/dev/null | jq -r '.s3_raw_bucket_name.value' || echo "")
           cd ..
           
           if [ -n "$RAW_BUCKET" ]; then
