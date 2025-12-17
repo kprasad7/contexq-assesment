@@ -1,0 +1,146 @@
+name: View MLflow Metrics
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_runs:
+        description: 'Maximum number of ML runs to display'
+        required: false
+        default: '5'
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  view-metrics:
+    name: Display ML Training Metrics
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install boto3 tabulate
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: GitHubActions-MLflowMetrics
+
+      - name: View ML Training Metrics
+        id: metrics
+        run: |
+          echo "::group::ML Training Metrics"
+          python scripts/view_ml_metrics.py
+          echo "::endgroup::"
+          
+          # Capture output for summary
+          python scripts/view_ml_metrics.py > /tmp/metrics_output.txt 2>&1 || true
+
+      - name: Generate Job Summary
+        run: |
+          echo "# 🤖 ML Training Metrics Dashboard" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Job Run**: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Timestamp**: $(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Latest ML Training Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/metrics_output.txt >> $GITHUB_STEP_SUMMARY || echo "No metrics found" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "To view full MLflow UI, run: \`./scripts/setup_mlflow_server.sh\`" >> $GITHUB_STEP_SUMMARY
+
+  setup-mlflow-ui:
+    name: Instructions for MLflow UI Setup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Display MLflow Setup Instructions
+        run: |
+          echo "::notice title=MLflow UI Setup::To view interactive MLflow dashboard, follow these steps:"
+          echo ""
+          echo "Option 1: Local MLflow UI (Development)"
+          echo "========================================"
+          echo "1. Run: ./scripts/setup_mlflow_server.sh"
+          echo "2. Choose option 1 (Local UI)"
+          echo "3. Access: http://localhost:5000"
+          echo ""
+          echo "Option 2: Docker MLflow Server"
+          echo "==============================="
+          echo "1. Run: ./scripts/setup_mlflow_server.sh"
+          echo "2. Choose option 3 (Docker)"
+          echo "3. Run: docker-compose -f docker-compose.mlflow.yml up -d"
+          echo "4. Access: http://localhost:5000"
+          echo ""
+          echo "Option 3: EC2 Production Server"
+          echo "================================"
+          echo "1. Run: ./scripts/setup_mlflow_server.sh"
+          echo "2. Choose option 2 (EC2)"
+          echo "3. Upload generated script to EC2 instance"
+          echo "4. Execute setup script on EC2"
+          echo "5. Access: http://<ec2-public-ip>:5000"
+
+      - name: Create Setup Summary
+        run: |
+          echo "# 🚀 MLflow UI Setup Guide" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Quick Start Options" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Option 1: View Metrics from Logs (No Setup Required)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo 'python scripts/view_ml_metrics.py' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 💻 Option 2: Local MLflow UI" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo './scripts/setup_mlflow_server.sh  # Choose option 1' >> $GITHUB_STEP_SUMMARY
+          echo 'open http://localhost:5000' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐳 Option 3: Docker MLflow Server" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo './scripts/setup_mlflow_server.sh  # Choose option 3' >> $GITHUB_STEP_SUMMARY
+          echo 'docker-compose -f docker-compose.mlflow.yml up -d' >> $GITHUB_STEP_SUMMARY
+          echo 'open http://localhost:5000' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ☁️ Option 4: EC2 Production Server" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```bash' >> $GITHUB_STEP_SUMMARY
+          echo './scripts/setup_mlflow_server.sh  # Choose option 2' >> $GITHUB_STEP_SUMMARY
+          echo '# Upload mlflow_ec2_setup.sh to EC2 instance' >> $GITHUB_STEP_SUMMARY
+          echo 'scp mlflow_ec2_setup.sh ec2-user@<instance-ip>:~/' >> $GITHUB_STEP_SUMMARY
+          echo 'ssh ec2-user@<instance-ip> "bash mlflow_ec2_setup.sh"' >> $GITHUB_STEP_SUMMARY
+          echo 'open http://<ec2-public-ip>:5000' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📋 Current Metrics Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See the **View ML Training Metrics** job for latest model performance." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "*For detailed documentation, see [CI_CD_PIPELINE.md](../blob/main/CI_CD_PIPELINE.md)*" >> $GITHUB_STEP_SUMMARY
