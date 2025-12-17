@@ -106,58 +106,46 @@ jobs:
           echo "🚀 Applying Terraform infrastructure..."
           cd terraform
           terraform apply -auto-approve tfplan
-          
-          # Export outputs
-          terraform output -json > outputs.json
           echo "✅ Infrastructure deployed successfully"
           
           # Show key outputs
           echo "## Deployment Outputs" >> $GITHUB_STEP_SUMMARY
           terraform output >> $GITHUB_STEP_SUMMARY
 
+      - name: Export Terraform outputs as environment variables
+        id: tf_outputs
+        run: |
+          cd terraform
+          echo "raw_bucket=$(terraform output -raw s3_raw_bucket_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "processed_bucket=$(terraform output -raw s3_processed_bucket_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "mwaa_bucket=$(terraform output -raw mwaa_dags_bucket 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "etl_job=$(terraform output -raw glue_job_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "ml_job=$(terraform output -raw glue_ml_training_job_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+          echo "glue_db=$(terraform output -raw glue_database_name 2>/dev/null | grep -v '::' | tail -1)" >> $GITHUB_OUTPUT
+
       - name: Upload Spark jobs to S3 (post-Terraform)
         run: |
-          echo "📤 Uploading Spark job scripts to S3 (using Terraform outputs)..."
-          cd terraform
-          
-          # Get bucket name from outputs.json (avoid GitHub Actions wrapper issues)
-          export RAW_DATA_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
-          echo "Target bucket: $RAW_DATA_BUCKET"
-          cd ..
-          
-          if [ -z "$RAW_DATA_BUCKET" ]; then
-            echo "❌ Error: Could not get raw-data bucket from Terraform output"
-            exit 1
-          fi
+          echo "📤 Uploading Spark job scripts to S3..."
+          echo "Target bucket: ${{ steps.tf_outputs.outputs.raw_bucket }}"
           
           # Upload comprehensive ETL job
           aws s3 cp src/spark/comprehensive_etl_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/comprehensive_etl_job.py
+            s3://${{ steps.tf_outputs.outputs.raw_bucket }}/glue-scripts/comprehensive_etl_job.py
           
           # Upload ML training job
           aws s3 cp src/spark/ml_training_job.py \
-            s3://${RAW_DATA_BUCKET}/glue-scripts/ml_training_job.py
+            s3://${{ steps.tf_outputs.outputs.raw_bucket }}/glue-scripts/ml_training_job.py
           
           echo "✅ Spark jobs uploaded successfully"
 
       - name: Upload Airflow DAG to MWAA
         run: |
           echo "📤 Deploying Airflow DAG to MWAA..."
-          cd terraform
-          
-          # Get MWAA bucket from outputs.json
-          export MWAA_BUCKET=$(cat outputs.json | jq -r '.mwaa_dags_bucket.value')
-          echo "Target MWAA bucket: $MWAA_BUCKET"
-          cd ..
-          
-          if [ -z "$MWAA_BUCKET" ]; then
-            echo "❌ Error: Could not get MWAA bucket from Terraform output"
-            exit 1
-          fi
+          echo "Target MWAA bucket: ${{ steps.tf_outputs.outputs.mwaa_bucket }}"
           
           # Upload DAG
           aws s3 cp src/airflow/dags/olist_data_pipeline.py \
-            s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
+            s3://${{ steps.tf_outputs.outputs.mwaa_bucket }}/dags/olist_data_pipeline.py
           
           echo "✅ Airflow DAG uploaded successfully"
           echo "ℹ️ MWAA will auto-sync DAG from S3 within 1 minute"
@@ -165,102 +153,74 @@ jobs:
       - name: Upload source data files to S3
         run: |
           echo "📥 Uploading source data files..."
-          cd terraform
-          
-          export RAW_DATA_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
-          cd ..
           
           # Upload source CSV files
           aws s3 cp olist_order_items_dataset.csv \
-            s3://${RAW_DATA_BUCKET}/source_supply/olist_order_items_dataset.csv
+            s3://${{ steps.tf_outputs.outputs.raw_bucket }}/source_supply/olist_order_items_dataset.csv
           
           aws s3 cp olist_order_payments_dataset.csv \
-            s3://${RAW_DATA_BUCKET}/source_financial/olist_order_payments_dataset.csv
+            s3://${{ steps.tf_outputs.outputs.raw_bucket }}/source_financial/olist_order_payments_dataset.csv
           
           aws s3 cp olist_sellers_dataset.csv \
-            s3://${RAW_DATA_BUCKET}/source_supply/olist_sellers_dataset.csv
+            s3://${{ steps.tf_outputs.outputs.raw_bucket }}/source_supply/olist_sellers_dataset.csv
           
           echo "✅ Source data files uploaded successfully"
 
       - name: Verify Glue jobs created by Terraform
         run: |
           echo "✅ Verifying Glue jobs created by Terraform..."
-          cd terraform
           
-          # Get job names from outputs.json
-          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
-          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
-          cd ..
-          
-          echo "Expected ETL job: $ETL_JOB"
-          echo "Expected ML job: $ML_JOB"
+          echo "Expected ETL job: ${{ steps.tf_outputs.outputs.etl_job }}"
+          echo "Expected ML job: ${{ steps.tf_outputs.outputs.ml_job }}"
           
           # Verify jobs exist in AWS
-          aws glue get-job --job-name "$ETL_JOB" --region us-east-1 > /dev/null && echo "✅ ETL job verified"
-          aws glue get-job --job-name "$ML_JOB" --region us-east-1 > /dev/null && echo "✅ ML job verified"
+          aws glue get-job --job-name "${{ steps.tf_outputs.outputs.etl_job }}" --region us-east-1 > /dev/null && echo "✅ ETL job verified"
+          aws glue get-job --job-name "${{ steps.tf_outputs.outputs.ml_job }}" --region us-east-1 > /dev/null && echo "✅ ML job verified"
           
           echo "✅ All Glue jobs verified"
 
       - name: Trigger Airflow DAG refresh
         run: |
           echo "🔄 Verifying MWAA DAG deployment..."
-          cd terraform
-          export MWAA_BUCKET=$(cat outputs.json | jq -r '.mwaa_dags_bucket.value')
-          cd ..
           
           # Verify DAG is accessible
-          aws s3 ls s3://${MWAA_BUCKET}/dags/olist_data_pipeline.py
+          aws s3 ls s3://${{ steps.tf_outputs.outputs.mwaa_bucket }}/dags/olist_data_pipeline.py
           echo "✅ DAG file verified in S3"
 
       - name: Run smoke tests against deployed infrastructure
         run: |
           echo "🔬 Running smoke tests..."
-          cd terraform
-          
-          # Get values from outputs.json
-          export RAW_BUCKET=$(cat outputs.json | jq -r '.s3_raw_bucket_name.value')
-          export PROCESSED_BUCKET=$(cat outputs.json | jq -r '.s3_processed_bucket_name.value')
-          export GLUE_DB=$(cat outputs.json | jq -r '.glue_database_name.value')
-          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
-          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
-          cd ..
           
           # Verify S3 buckets exist
           echo "Checking S3 buckets..."
-          aws s3 ls s3://${RAW_BUCKET}/ > /dev/null && echo "✅ raw-data bucket accessible"
-          aws s3 ls s3://${PROCESSED_BUCKET}/ > /dev/null && echo "✅ processed-data bucket accessible"
+          aws s3 ls s3://${{ steps.tf_outputs.outputs.raw_bucket }}/ > /dev/null && echo "✅ raw-data bucket accessible"
+          aws s3 ls s3://${{ steps.tf_outputs.outputs.processed_bucket }}/ > /dev/null && echo "✅ processed-data bucket accessible"
           
           # Verify Glue database exists
           echo "Checking Glue database..."
-          aws glue get-database --name ${GLUE_DB} --region us-east-1 > /dev/null && echo "✅ Glue database found"
+          aws glue get-database --name ${{ steps.tf_outputs.outputs.glue_db }} --region us-east-1 > /dev/null && echo "✅ Glue database found"
           
           # Verify Glue jobs exist
           echo "Checking Glue jobs..."
-          aws glue get-job --job-name ${ETL_JOB} --region us-east-1 > /dev/null && echo "✅ ETL job exists"
-          aws glue get-job --job-name ${ML_JOB} --region us-east-1 > /dev/null && echo "✅ ML job exists"
+          aws glue get-job --job-name ${{ steps.tf_outputs.outputs.etl_job }} --region us-east-1 > /dev/null && echo "✅ ETL job exists"
+          aws glue get-job --job-name ${{ steps.tf_outputs.outputs.ml_job }} --region us-east-1 > /dev/null && echo "✅ ML job exists"
           
           # Verify Iceberg table
           echo "Checking Iceberg table..."
-          aws glue get-table --database-name ${GLUE_DB} --name corporate_registry --region us-east-1 > /dev/null && echo "✅ Iceberg table exists"
+          aws glue get-table --database-name ${{ steps.tf_outputs.outputs.glue_db }} --name corporate_registry --region us-east-1 > /dev/null && echo "✅ Iceberg table exists"
           
           echo "✅ All smoke tests passed"
 
       - name: Create deployment summary
         if: success()
         run: |
-          cd terraform
-          export ETL_JOB=$(cat outputs.json | jq -r '.glue_job_name.value')
-          export ML_JOB=$(cat outputs.json | jq -r '.glue_ml_training_job_name.value')
-          export GLUE_DB=$(cat outputs.json | jq -r '.glue_database_name.value')
-          cd ..
-          
           echo "## ✅ Deployment Successful" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Deployed Components" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Spark ETL Job: \`${ETL_JOB}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Spark ML Training Job: \`${ML_JOB}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Spark ETL Job: \`${{ steps.tf_outputs.outputs.etl_job }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Spark ML Training Job: \`${{ steps.tf_outputs.outputs.ml_job }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Airflow DAG: \`olist_data_pipeline\` (MWAA)" >> $GITHUB_STEP_SUMMARY
-          echo "- ✅ Glue Database: \`${GLUE_DB}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- ✅ Glue Database: \`${{ steps.tf_outputs.outputs.glue_db }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- ✅ Iceberg Table: \`corporate_registry\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
@@ -305,14 +265,8 @@ jobs:
           
           # Rollback is handled by Terraform state management
           # For script rollback, get previous versions from S3 versioning
-          cd terraform
-          export RAW_BUCKET=$(cat outputs.json 2>/dev/null | jq -r '.s3_raw_bucket_name.value' || echo "")
-          cd ..
-          
-          if [ -n "$RAW_BUCKET" ]; then
-            echo "ℹ️ S3 versioning enabled - previous script versions preserved"
-            echo "Manual rollback: restore previous version from S3 console if needed"
-          fi
+          echo "ℹ️ S3 versioning enabled - previous script versions preserved"
+          echo "Manual rollback: restore previous version from S3 console if needed"
           
           echo "⚠️ Deployment failed - review logs for details"
 

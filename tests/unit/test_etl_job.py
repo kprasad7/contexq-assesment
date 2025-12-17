@@ -1,216 +1,147 @@
-"""Unit tests for ETL job components."""
+"""Unit tests for the comprehensive ETL pipeline helpers."""
+
+import math
 
 import pytest
 from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, DoubleType, IntegerType
-import sys
-import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../src/spark'))
+from src.spark.comprehensive_etl_job import (
+    cleanse_company_name,
+    compute_corporate_id,
+    harmonize_sources,
+    normalize_address,
+    prepare_financial_dataframe,
+    prepare_supply_chain_dataframe,
+)
 
 
 @pytest.fixture(scope="session")
 def spark():
-    """Create a Spark session for tests."""
-    spark = SparkSession.builder \
-        .appName("test-etl") \
-        .master("local[1]") \
-        .config("spark.sql.shuffle.partitions", "1") \
+    session = (
+        SparkSession.builder.appName("contexq-etl-tests")
+        .master("local[2]")
+        .config("spark.sql.shuffle.partitions", "2")
+        .config("spark.ui.enabled", "false")
         .getOrCreate()
-    yield spark
-    spark.stop()
-
-
-@pytest.fixture
-def sample_supply_data(spark):
-    """Create sample supply chain data."""
-    schema = StructType([
-        StructField("supplier_id", StringType()),
-        StructField("supplier_name", StringType()),
-        StructField("revenue", DoubleType()),
-        StructField("state", StringType()),
-    ])
-    
-    data = [
-        ("S001", "Acme Corporation", 1000000.0, "SP"),
-        ("S002", "Acme Corp", 950000.0, "SP"),
-        ("S003", "TechVision Ltd", 500000.0, "RJ"),
-    ]
-    
-    return spark.createDataFrame(data, schema)
-
-
-@pytest.fixture
-def sample_financial_data(spark):
-    """Create sample financial data."""
-    schema = StructType([
-        StructField("payment_id", StringType()),
-        StructField("supplier_id", StringType()),
-        StructField("amount", DoubleType()),
-        StructField("transaction_date", StringType()),
-    ])
-    
-    data = [
-        ("P001", "S001", 50000.0, "2025-12-01"),
-        ("P002", "S002", 45000.0, "2025-12-02"),
-        ("P003", "S003", 25000.0, "2025-12-03"),
-    ]
-    
-    return spark.createDataFrame(data, schema)
-
-
-def test_data_loads_successfully(sample_supply_data, sample_financial_data):
-    """Test that sample data loads correctly."""
-    assert sample_supply_data.count() == 3
-    assert sample_financial_data.count() == 3
-    
-    # Verify schemas
-    assert len(sample_supply_data.columns) == 4
-    assert len(sample_financial_data.columns) == 4
-
-
-def test_fuzzy_matching_detects_duplicates(sample_supply_data):
-    """Test entity resolution finds similar company names."""
-    from fuzzywuzzy import fuzz
-    
-    # Test fuzzy matching
-    company1 = "Acme Corporation"
-    company2 = "Acme Corp"
-    
-    ratio = fuzz.token_set_ratio(company1, company2)
-    assert ratio > 80, f"Expected high similarity score, got {ratio}"
-
-
-def test_schema_harmonization(spark):
-    """Test data harmonization to Iceberg schema."""
-    source_schema = StructType([
-        StructField("id", StringType()),
-        StructField("name", StringType()),
-        StructField("value", DoubleType()),
-    ])
-    
-    source_data = [("1", "Test", 100.0)]
-    source_df = spark.createDataFrame(source_data, source_schema)
-    
-    # Expected Iceberg schema (13 columns)
-    iceberg_schema = [
-        "corporate_id", "revenue", "profit", "profit_margin",
-        "market", "state", "city", "activity_places",
-        "supplier_name", "transaction_count", "avg_transaction",
-        "last_update", "data_source"
-    ]
-    
-    # Harmonize: cast and add columns
-    harmonized = source_df.select(
-        source_df.id.cast("string").alias("corporate_id"),
-        source_df.value.cast("double").alias("revenue"),
     )
-    
-    # Add remaining columns with defaults
-    for col in iceberg_schema[2:]:
-        harmonized = harmonized.withColumn(col, 
-            None if col in ["profit", "market", "state", "city", "supplier_name", "last_update"] 
-            else 0 if col in ["profit_margin", "transaction_count", "avg_transaction"] 
-            else "imported")
-    
-    assert len(harmonized.columns) >= len(iceberg_schema) - 11
+    yield session
+    session.stop()
 
 
-def test_md5_hash_deterministic():
-    """Test that MD5 hashing is deterministic."""
-    import hashlib
-    
-    company = "Acme Corporation"
-    hash1 = hashlib.md5(company.encode()).hexdigest()
-    hash2 = hashlib.md5(company.encode()).hexdigest()
-    
-    assert hash1 == hash2
+def test_cleanse_company_name_and_address():
+    assert cleanse_company_name("Acme Corporation S.A.") == "acme corporation s a"
+    assert cleanse_company_name(None) == ""
+    assert normalize_address("Rua dos Acacias, 100 - Sao Paulo") == "rua dos acacias 100 sao paulo"
 
 
-def test_data_deduplication_logic(spark):
-    """Test deduplication keeps highest revenue record."""
-    schema = StructType([
-        StructField("entity_id", StringType()),
-        StructField("revenue", DoubleType()),
-    ])
-    
-    # Duplicate entities with different revenues
-    data = [
-        ("ENTITY_1", 100000.0),
-        ("ENTITY_1", 50000.0),  # Lower revenue duplicate
-    ]
-    
-    df = spark.createDataFrame(data, schema)
-    
-    # Group and take max revenue
-    from pyspark.sql.functions import max as spark_max
-    deduped = df.groupBy("entity_id").agg(spark_max("revenue").alias("revenue"))
-    
-    assert deduped.count() == 1
-    assert deduped.collect()[0].revenue == 100000.0
+def test_compute_corporate_id_is_deterministic():
+    first = compute_corporate_id("acme", "rua um")
+    second = compute_corporate_id("acme", "rua um")
+    third = compute_corporate_id("acme", "rua dois")
+    assert first == second
+    assert first != third
 
 
-def test_null_handling(spark):
-    """Test that null values are handled correctly."""
-    schema = StructType([
-        StructField("id", StringType()),
-        StructField("value", DoubleType()),
-    ])
-    
-    data = [
-        ("1", 100.0),
-        ("2", None),
-        ("3", 300.0),
-    ]
-    
-    df = spark.createDataFrame(data, schema)
-    
-    # Filter out nulls
-    filtered = df.filter(df.value.isNotNull())
-    
-    assert filtered.count() == 2
-
-
-def test_partition_strategy(spark):
-    """Test data partitioning strategy."""
-    schema = StructType([
-        StructField("date", StringType()),
-        StructField("value", DoubleType()),
-    ])
-    
-    data = [
-        ("2025-12-01", 100.0),
-        ("2025-12-01", 200.0),
-        ("2025-12-02", 150.0),
-    ]
-    
-    df = spark.createDataFrame(data, schema)
-    
-    # Partition by date
-    partitioned = df.repartition("date")
-    
-    assert partitioned.rdd.getNumPartitions() > 0
-
-
-def test_performance_large_dataset(spark):
-    """Test performance with large dataset."""
-    from pyspark.sql.functions import rand
-    import time
-    
-    # Generate 10k rows
-    large_df = spark.range(10000).select(
-        "id",
-        (rand() * 1000000).alias("value")
+def test_prepare_supply_chain_dataframe_shapes_data(spark):
+    raw = spark.createDataFrame(
+        [
+            ("seller_001", "Acme Corp", "Sao Paulo", "SP", 3, "ACME Ltda, ACME LLC"),
+            ("seller_002", "Tech Vision", "Rio", "RJ", None, None),
+        ],
+        ["seller_id", "seller_name", "seller_city", "seller_state", "activity_places", "top_suppliers"],
     )
-    
-    # Time aggregation
-    start = time.time()
-    result = large_df.groupBy("id").count().collect()
-    duration = time.time() - start
-    
-    assert len(result) > 0
-    assert duration < 5.0, f"Aggregation took too long: {duration}s"
+
+    prepared = prepare_supply_chain_dataframe(raw)
+
+    assert prepared.count() == 2
+    sample = prepared.where("seller_id = 'seller_001'").collect()[0]
+    assert sample.canonical_name == "acme corp"
+    assert sample.activity_places == 3
+    assert sample.state == "SP"
+    assert sample.source_system == "supply_chain"
 
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+def test_prepare_financial_dataframe_aggregates_metrics(spark):
+    items = spark.createDataFrame(
+        [
+            ("order-1", "seller_001", 100.0, 10.0),
+            ("order-2", "seller_001", 200.0, 15.0),
+            ("order-3", "seller_002", 80.0, 5.0),
+        ],
+        ["order_id", "seller_id", "price", "freight_value"],
+    )
+    payments = spark.createDataFrame(
+        [
+            ("order-1", 120.0),
+            ("order-2", 215.0),
+            ("order-3", 90.0),
+        ],
+        ["order_id", "payment_value"],
+    )
+    sellers = prepare_supply_chain_dataframe(
+        spark.createDataFrame(
+            [
+                ("seller_001", "Acme Corp", "Sao Paulo", "SP", 3, "ACME Ltda"),
+                ("seller_002", "Tech Vision", "Rio", "RJ", 2, "Vision Supplies"),
+            ],
+            [
+                "seller_id",
+                "seller_name",
+                "seller_city",
+                "seller_state",
+                "activity_places",
+                "top_suppliers",
+            ],
+        )
+    )
+
+    financial = prepare_financial_dataframe(items, payments, sellers)
+
+    assert financial.count() == 2
+    acme = financial.where("seller_id = 'seller_001'").collect()[0]
+    assert math.isclose(acme.revenue, 325.0, rel_tol=1e-6)
+    assert math.isclose(acme.profit, 58.5, rel_tol=1e-6)
+    assert acme.transaction_count == 2
+    assert acme.source_system == "financial"
+
+
+def test_harmonize_sources_merges_entities(spark):
+    supply = prepare_supply_chain_dataframe(
+        spark.createDataFrame(
+            [
+                ("seller_001", "Acme Corp", "Sao Paulo", "SP", 3, "ACME Ltda"),
+                ("seller_002", "Tech Vision", "Rio", "RJ", 2, "Vision Supplies"),
+            ],
+            [
+                "seller_id",
+                "seller_name",
+                "seller_city",
+                "seller_state",
+                "activity_places",
+                "top_suppliers",
+            ],
+        )
+    )
+
+    items = spark.createDataFrame(
+        [
+            ("order-1", "seller_001", 100.0, 10.0),
+            ("order-2", "seller_001", 150.0, 12.0),
+        ],
+        ["order_id", "seller_id", "price", "freight_value"],
+    )
+    payments = spark.createDataFrame(
+        [("order-1", 115.0), ("order-2", 170.0)],
+        ["order_id", "payment_value"],
+    )
+    financial = prepare_financial_dataframe(items, payments, supply)
+
+    harmonized = harmonize_sources(supply, financial)
+
+    assert harmonized.count() == 2
+    record = harmonized.where("city = 'Sao Paulo'").collect()[0]
+    assert record.activity_places == 3
+    assert record.transaction_count == 2
+    assert record.source_system in {"supply_chain,financial", "financial,supply_chain"}
+    assert record.profit_margin > 0
+
