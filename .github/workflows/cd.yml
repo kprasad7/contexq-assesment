@@ -105,7 +105,7 @@ jobs:
         run: |
           echo "🚀 Applying Terraform infrastructure..."
           cd terraform
-          terraform apply -var-file=environments/dev.tfvars -auto-approve tfplan
+          terraform apply -auto-approve tfplan
           
           # Export outputs
           terraform output -json > outputs.json
