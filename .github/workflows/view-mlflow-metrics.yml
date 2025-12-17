@@ -19,6 +19,7 @@ jobs:
     
     environment:
       name: production
+      url: https://console.aws.amazon.com/
     
     steps:
       - name: Checkout code
