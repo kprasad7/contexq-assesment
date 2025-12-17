@@ -139,7 +139,14 @@ def harmonize_sources(supply: DataFrame, financial: DataFrame) -> DataFrame:
 
 	# Alias DataFrames to avoid ambiguous column references
 	financial_aliased = financial.alias("fin")
-	id_map_subset = id_map.select("seller_id", "corporate_id", "address", "city", "state").alias("id")
+	# Prefix columns to avoid ambiguity after join
+	id_map_subset = id_map.select(
+		F.col("seller_id").alias("seller_id"),
+		F.col("corporate_id").alias("map_corporate_id"),
+		F.col("address").alias("map_address"),
+		F.col("city").alias("map_city"),
+		F.col("state").alias("map_state")
+	).alias("id")
 
 	financial_with_ids = (
 		financial_aliased.join(id_map_subset, on="seller_id", how="left")
@@ -147,11 +154,11 @@ def harmonize_sources(supply: DataFrame, financial: DataFrame) -> DataFrame:
 		.withColumn("source_system", F.lit("financial"))
 		.select(
 			F.col("fin.seller_id").alias("seller_id"),
-			F.col("id.corporate_id").alias("corporate_id"),
+			F.col("id.map_corporate_id").alias("corporate_id"),
 			F.col("corporate_name"),
-			F.col("id.address").alias("address"),
-			F.col("id.city").alias("city"),
-			F.col("id.state").alias("state"),
+			F.col("id.map_address").alias("address"),
+			F.col("id.map_city").alias("city"),
+			F.col("id.map_state").alias("state"),
 			F.lit(None).cast("int").alias("activity_places"),
 			F.lit(None).cast("string").alias("top_suppliers"),
 			F.lit(None).cast("string").alias("main_customers"),
