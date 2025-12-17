@@ -334,46 +334,75 @@ def _merge_into_iceberg(spark: SparkSession, harmonized: DataFrame, database: st
 		.withColumn("month", F.lit(now.month).cast("int"))
 	)
 
-	staging.createOrReplaceTempView("staging_corporate_registry")
+	# Force materialization by collecting count - this evaluates all UDFs
+	logger.info("Materializing staging data (count: %d)", staging.count())
+	
+	# Cache the fully materialized DataFrame
+	staging_materialized = staging.cache()
+	staging_materialized.count()  # Force cache population
+	
+	# Now create temp view from materialized data
+	staging_materialized.createOrReplaceTempView("staging_corporate_registry")
 	spark.sql(f"CREATE DATABASE IF NOT EXISTS glue_catalog.{database}")
 
-	merge_sql = f"""
-	MERGE INTO {target} t
-	USING staging_corporate_registry s
-	  ON t.corporate_id = s.corporate_id
-	WHEN MATCHED THEN UPDATE SET
-	  t.corporate_name = COALESCE(s.corporate_name, t.corporate_name),
-	  t.address        = COALESCE(s.address, t.address),
-	  t.city           = COALESCE(s.city, t.city),
-	  t.state          = COALESCE(s.state, t.state),
-	  t.activity_places= COALESCE(s.activity_places, t.activity_places),
-	  t.top_suppliers  = COALESCE(s.top_suppliers, t.top_suppliers),
-	  t.main_customers = COALESCE(s.main_customers, t.main_customers),
-	  t.revenue        = COALESCE(s.revenue, t.revenue),
-	  t.profit         = COALESCE(s.profit, t.profit),
-	  t.load_date      = COALESCE(s.load_date, t.load_date),
-	  t.source_system  = COALESCE(s.source_system, t.source_system),
-	  t._etl_processed_dttm    = s._etl_processed_dttm,
-	  t._data_contract_version = s._data_contract_version,
-	  t.year = s.year,
-	  t.month = s.month
-	WHEN NOT MATCHED THEN INSERT (
-	  corporate_id, corporate_name, address, city, state, activity_places,
-	  top_suppliers, main_customers, revenue, profit, load_date, source_system,
-	  _etl_processed_dttm, _data_contract_version, year, month
-	) VALUES (
-	  s.corporate_id, s.corporate_name, s.address, s.city, s.state, s.activity_places,
-	  s.top_suppliers, s.main_customers, s.revenue, s.profit, s.load_date, s.source_system,
-	  s._etl_processed_dttm, s._data_contract_version, s.year, s.month
-	)
-	"""
-
-	logger.info("Running Iceberg MERGE into %s", target)
-	spark.sql(merge_sql)
+	# Check if table exists by trying to describe it
+	table_exists = False
+	try:
+		spark.sql(f"DESCRIBE TABLE {target}").collect()
+		table_exists = True
+		logger.info("Table %s exists. Running MERGE operation.", target)
+	except Exception as e:
+		if "Table or view not found" in str(e) or "does not exist" in str(e):
+			logger.info("Table %s doesn't exist. Creating Iceberg table on first run.", target)
+			# Use DataFrame API to write, which handles UDFs better
+			staging_materialized.writeTo(target).using("iceberg").partitionedBy("year", "month").create()
+			logger.info("Successfully created table %s", target)
+			table_exists = False
+		else:
+			raise
+	
+	if table_exists:
+		merge_sql = f"""
+		MERGE INTO {target} t
+		USING staging_corporate_registry s
+		  ON t.corporate_id = s.corporate_id
+		WHEN MATCHED THEN UPDATE SET
+		  t.corporate_name = COALESCE(s.corporate_name, t.corporate_name),
+		  t.address        = COALESCE(s.address, t.address),
+		  t.city           = COALESCE(s.city, t.city),
+		  t.state          = COALESCE(s.state, t.state),
+		  t.activity_places= COALESCE(s.activity_places, t.activity_places),
+		  t.top_suppliers  = COALESCE(s.top_suppliers, t.top_suppliers),
+		  t.main_customers = COALESCE(s.main_customers, t.main_customers),
+		  t.revenue        = COALESCE(s.revenue, t.revenue),
+		  t.profit         = COALESCE(s.profit, t.profit),
+		  t.load_date      = COALESCE(s.load_date, t.load_date),
+		  t.source_system  = COALESCE(s.source_system, t.source_system),
+		  t._etl_processed_dttm    = s._etl_processed_dttm,
+		  t._data_contract_version = s._data_contract_version,
+		  t.year = s.year,
+		  t.month = s.month
+		WHEN NOT MATCHED THEN INSERT (
+		  corporate_id, corporate_name, address, city, state, activity_places,
+		  top_suppliers, main_customers, revenue, profit, load_date, source_system,
+		  _etl_processed_dttm, _data_contract_version, year, month
+		) VALUES (
+		  s.corporate_id, s.corporate_name, s.address, s.city, s.state, s.activity_places,
+		  s.top_suppliers, s.main_customers, s.revenue, s.profit, s.load_date, s.source_system,
+		  s._etl_processed_dttm, s._data_contract_version, s.year, s.month
+		)
+		"""
+		spark.sql(merge_sql)
+		logger.info("Successfully merged data into %s", target)
 
 
 def main() -> int:
 	spark, args, job = _get_spark_and_args()
+
+	# Register UDFs for SQL usage
+	spark.udf.register("cleanse_company_name", cleanse_company_name, "string")
+	spark.udf.register("normalize_address", normalize_address, "string")
+	spark.udf.register("compute_corporate_id", compute_corporate_id, "string")
 
 	source_bucket = args["source_bucket"]
 	target_bucket = args["target_bucket"]
@@ -409,5 +438,6 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-	raise SystemExit(main())
+	main()
+
 

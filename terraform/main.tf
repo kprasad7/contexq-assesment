@@ -90,10 +90,10 @@ module "glue_ml_training_job" {
   job_name        = "${local.name_prefix}-ml-training"
   role_arn        = module.iam_roles.glue_service_role_arn
   glue_version    = local.glue_config.glue_version
-  worker_type     = local.glue_config.worker_type
-  num_workers     = local.glue_config.num_workers
+  worker_type     = "G.1X" # ML training uses smaller workers
+  num_workers     = 2      # ML training needs fewer workers than ETL
   timeout_minutes = local.glue_config.timeout_minutes
-  max_retries     = local.glue_config.max_retries
+  max_retries     = 0 # ML training should not auto-retry
   python_version  = local.glue_config.python_version
 
   script_location    = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/ml_training_job.py"
@@ -109,10 +109,13 @@ module "glue_ml_training_job" {
 
   # MLflow args + Iceberg enablement
   extra_default_arguments = {
-    "--mlflow_tracking_uri"       = "http://localhost:5000"
+    # S3-based MLflow tracking (local SQLite for metadata, S3 for artifacts)
+    "--mlflow_tracking_uri"       = "s3://${module.s3_buckets.mlflow_bucket_name}/mlruns"
     "--experiment_name"           = "olist-profit-prediction"
     "--additional-python-modules" = "mlflow==2.9.2"
     "--datalake-formats"          = "iceberg"
+    # Iceberg catalog configuration with warehouse path
+    "--conf" = "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions --conf spark.sql.catalog.glue_catalog=org.apache.iceberg.spark.SparkCatalog --conf spark.sql.catalog.glue_catalog.catalog-impl=org.apache.iceberg.aws.glue.GlueCatalog --conf spark.sql.catalog.glue_catalog.warehouse=s3://${module.s3_buckets.processed_bucket_name}/warehouse/"
   }
 
   # Orchestration should drive this job (no schedule trigger)

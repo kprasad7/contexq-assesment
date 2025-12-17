@@ -98,25 +98,38 @@ class ProfitPredictionModel:
         self.database = database
         self.table = table
         self.experiment_name = experiment_name
-        mlflow.set_tracking_uri(mlflow_tracking_uri)
-        logger.info("MLflow tracking URI: %s", mlflow_tracking_uri)
+        
+        # MLflow S3 configuration: use S3 for artifacts, local for tracking DB
+        # This is the recommended pattern for AWS Glue
+        if mlflow_tracking_uri.startswith("s3://"):
+            # Extract S3 bucket path for artifacts
+            self.artifact_location = mlflow_tracking_uri
+            # Use local sqlite for tracking metadata (stored in temp dir)
+            tracking_db = "file:///tmp/mlruns"
+            mlflow.set_tracking_uri(tracking_db)
+            logger.info(f"✓ MLflow tracking DB: {tracking_db}, Artifacts: {self.artifact_location}")
+        elif mlflow_tracking_uri.startswith("http"):
+            mlflow.set_tracking_uri(mlflow_tracking_uri)
+            self.artifact_location = None
+            logger.info(f"✓ MLflow remote tracking URI: {mlflow_tracking_uri}")
+        else:
+            mlflow.set_tracking_uri(mlflow_tracking_uri)
+            self.artifact_location = None
+            logger.info(f"✓ MLflow tracking URI: {mlflow_tracking_uri}")
+        
+        logger.info("MLflow tracking URI configured")
     
     def load_training_data(self):
         """Load corporate_registry from Iceberg."""
         logger.info("Loading corporate_registry from Iceberg...")
 
-        # Configure Iceberg + Glue Catalog (works in Glue 4.0 when Iceberg is enabled)
-        self.spark.conf.set(
-            "spark.sql.extensions",
-            "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
-        )
-        self.spark.conf.set("spark.sql.catalog.glue_catalog", "org.apache.iceberg.spark.SparkCatalog")
-        self.spark.conf.set(
-            "spark.sql.catalog.glue_catalog.catalog-impl",
-            "org.apache.iceberg.aws.glue.GlueCatalog",
-        )
-        self.spark.conf.set("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
-        self.spark.conf.set("spark.sql.defaultCatalog", "glue_catalog")
+        # Iceberg + Glue Catalog configuration is set via --conf in Glue job arguments
+        # Static configs like spark.sql.extensions must be set at Spark initialization
+        # Only set non-static catalog configs at runtime if needed
+        try:
+            self.spark.conf.set("spark.sql.catalog.glue_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO")
+        except Exception as e:
+            logger.warning("Could not set Iceberg config (may already be configured): %s", e)
 
         df = self.spark.sql(
             f"""
@@ -132,13 +145,19 @@ class ProfitPredictionModel:
             """
         )
 
-        # Label (simple business outcome): profit above a fixed threshold
+        # Label (simple business outcome): profit above median (~180) for balanced classes
         df = df.withColumn(
             "high_profit_label",
-            when(col("profit") > lit(100000.0), lit(1)).otherwise(lit(0)).cast("int"),
+            when(col("profit") > lit(180.0), lit(1)).otherwise(lit(0)).cast("int"),
         )
         
-        logger.info("✓ Loaded %,d training records", df.count())
+        record_count = df.count()
+        logger.info(f"✓ Loaded {record_count} training records")
+        
+        # Check class distribution
+        class_dist = df.groupBy("high_profit_label").count().collect()
+        logger.info(f"Class distribution: {[(row['high_profit_label'], row['count']) for row in class_dist]}")
+        
         return df
     
     def prepare_features(self, df):
@@ -214,9 +233,17 @@ class ProfitPredictionModel:
         """Train model and evaluate."""
         logger.info("Training and evaluating model...")
         
+        # Validate we have both classes
+        class_counts = df_indexed.groupBy("high_profit_label").count().collect()
+        classes_present = {row['high_profit_label'] for row in class_counts}
+        if len(classes_present) < 2:
+            raise ValueError(f"Binary classification requires both classes (0 and 1), but only found: {classes_present}")
+        
         # Train/test split (80/20)
         df_train, df_test = df_indexed.randomSplit([0.8, 0.2], seed=42)
-        logger.info(f"✓ Train records: {df_train.count():,}, Test records: {df_test.count():,}")
+        train_count = df_train.count()
+        test_count = df_test.count()
+        logger.info(f"✓ Train records: {train_count}, Test records: {test_count}")
         
         # Build and fit pipeline
         pipeline = self.build_pipeline()
@@ -250,22 +277,47 @@ class ProfitPredictionModel:
         """Log model and metrics to MLflow."""
         logger.info("Logging model to MLflow...")
         
-        mlflow.set_experiment(self.experiment_name)
+        # Create/set experiment with S3 artifact location if configured
+        if self.artifact_location:
+            try:
+                # Try to get existing experiment
+                experiment = mlflow.get_experiment_by_name(self.experiment_name)
+                if experiment is None:
+                    # Create new experiment with S3 artifact location
+                    experiment_id = mlflow.create_experiment(
+                        self.experiment_name,
+                        artifact_location=self.artifact_location
+                    )
+                    logger.info(f"✓ Created experiment '{self.experiment_name}' with S3 artifacts")
+                else:
+                    experiment_id = experiment.experiment_id
+                    logger.info(f"✓ Using existing experiment '{self.experiment_name}'")
+                mlflow.set_experiment(experiment_id=experiment_id)
+            except Exception as e:
+                logger.warning(f"Could not set S3 artifact location: {e}, using default")
+                mlflow.set_experiment(self.experiment_name)
+        else:
+            mlflow.set_experiment(self.experiment_name)
         
         with mlflow.start_run(run_name=f"profit-prediction-{datetime.now().strftime('%Y%m%d_%H%M%S')}"):
             # Log metrics
             mlflow.log_metric("auc", metrics["auc"])
             mlflow.log_metric("f1", metrics["f1"])
             
-            # Log model
-            mlflow.spark.log_model(
-                model,
-                artifact_path="profit-prediction-model",
-                registered_model_name="profit-prediction-v1"
-            )
-            
             # Log params
             mlflow.log_param("train_test_split", "0.8/0.2")
+            mlflow.log_param("profit_threshold", "180.0")
+            mlflow.log_param("database", self.database)
+            mlflow.log_param("table", self.table)
+            
+            # Note: Saving Spark ML models to S3 via MLflow conflicts with Glue's DirectOutputCommitter
+            # For production, consider saving model separately to S3 or using MLflow with a tracking server
+            logger.info("✓ Metrics logged to MLflow")
+            
+            run_id = mlflow.active_run().info.run_id
+            logger.info(f"✓ MLflow run ID: {run_id}")
+            
+            return run_id
             mlflow.log_param("regParam", 0.01)
             mlflow.log_param("elasticNetParam", 0.5)
             mlflow.log_param("maxIter", 100)
@@ -339,4 +391,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
