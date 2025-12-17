@@ -140,3 +140,21 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "extra_default_arguments" {
+  description = "Additional Glue default arguments merged into the job's default_arguments"
+  type        = map(string)
+  default     = {}
+}
+
+variable "create_trigger" {
+  description = "Whether to create a scheduled Glue trigger for this job"
+  type        = bool
+  default     = true
+}
+
+variable "trigger_schedule" {
+  description = "Cron expression for scheduled trigger (only used if create_trigger=true)"
+  type        = string
+  default     = "cron(0 2 * * ? *)"
+}

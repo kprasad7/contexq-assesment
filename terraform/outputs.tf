@@ -77,6 +77,16 @@ output "glue_job_arn" {
   value       = module.glue_jobs.job_arn
 }
 
+output "glue_ml_training_job_name" {
+  description = "Name of the Glue ML training job"
+  value       = module.glue_ml_training_job.job_name
+}
+
+output "glue_ml_training_job_arn" {
+  description = "ARN of the Glue ML training job"
+  value       = module.glue_ml_training_job.job_arn
+}
+
 output "cloudwatch_log_group_name" {
   description = "CloudWatch log group name for Glue jobs"
   value       = module.glue_jobs.log_group_name

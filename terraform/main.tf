@@ -73,6 +73,51 @@ module "glue_jobs" {
   log_group_name     = "/aws/glue/${local.name_prefix}-etl"
   log_retention_days = var.log_retention_days
 
+  # Iceberg enablement for Glue 4.0 Spark runtime
+  extra_default_arguments = {
+    "--datalake-formats" = "iceberg"
+  }
+
+  tags = local.common_tags
+
+  depends_on = [module.iam_roles, module.glue_catalog]
+}
+
+# Separate Glue job for ML training (reads Iceberg corporate_registry and logs to MLflow)
+module "glue_ml_training_job" {
+  source = "./modules/glue_jobs"
+
+  job_name        = "${local.name_prefix}-ml-training"
+  role_arn        = module.iam_roles.glue_service_role_arn
+  glue_version    = local.glue_config.glue_version
+  worker_type     = local.glue_config.worker_type
+  num_workers     = local.glue_config.num_workers
+  timeout_minutes = local.glue_config.timeout_minutes
+  max_retries     = local.glue_config.max_retries
+  python_version  = local.glue_config.python_version
+
+  script_location    = "s3://${module.s3_buckets.raw_bucket_name}/glue-scripts/ml_training_job.py"
+  temp_dir           = "s3://${module.s3_buckets.raw_bucket_name}/glue-temp/"
+  source_bucket_name = module.s3_buckets.raw_bucket_name
+  target_bucket_name = module.s3_buckets.processed_bucket_name
+
+  database_name = local.glue_config.database_name
+  table_name    = local.glue_config.table_name
+
+  log_group_name     = "/aws/glue/${local.name_prefix}-ml-training"
+  log_retention_days = var.log_retention_days
+
+  # MLflow args + Iceberg enablement
+  extra_default_arguments = {
+    "--mlflow_tracking_uri"       = "http://localhost:5000"
+    "--experiment_name"           = "olist-profit-prediction"
+    "--additional-python-modules" = "mlflow==2.9.2"
+    "--datalake-formats"          = "iceberg"
+  }
+
+  # Orchestration should drive this job (no schedule trigger)
+  create_trigger = false
+
   tags = local.common_tags
 
   depends_on = [module.iam_roles, module.glue_catalog]

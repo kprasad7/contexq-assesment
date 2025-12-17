@@ -25,10 +25,10 @@ output "log_group_arn" {
 
 output "trigger_name" {
   description = "Name of the scheduled trigger"
-  value       = aws_glue_trigger.etl_schedule.name
+  value       = var.create_trigger ? aws_glue_trigger.etl_schedule[0].name : null
 }
 
 output "trigger_arn" {
   description = "ARN of the scheduled trigger"
-  value       = aws_glue_trigger.etl_schedule.arn
+  value       = var.create_trigger ? aws_glue_trigger.etl_schedule[0].arn : null
 }

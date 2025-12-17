@@ -12,6 +12,7 @@ resource "aws_glue_job" "etl_job" {
   role_arn     = var.role_arn
   glue_version = var.glue_version
   timeout      = var.timeout_minutes
+  max_retries  = var.max_retries
   description  = "Comprehensive ETL job for CSV preparation, entity resolution, harmonization, Iceberg merge, and data quality checks"
 
   worker_type       = var.worker_type
@@ -27,7 +28,7 @@ resource "aws_glue_job" "etl_job" {
     max_concurrent_runs = 1
   }
 
-  default_arguments = {
+  default_arguments = merge({
     "--job-bookmark-option"              = "job-bookmark-enable"
     "--enable-continuous-cloudwatch-log" = "true"
     "--enable-spark-ui"                  = "true"
@@ -44,7 +45,7 @@ resource "aws_glue_job" "etl_job" {
     "--table"                 = var.table_name
     "--output-partition-keys" = "year,month"
     "--catalog"               = "glue"
-  }
+  }, var.extra_default_arguments)
 
   tags = var.tags
 
@@ -53,9 +54,10 @@ resource "aws_glue_job" "etl_job" {
 
 # Trigger for scheduled execution (optional)
 resource "aws_glue_trigger" "etl_schedule" {
+  count             = var.create_trigger ? 1 : 0
   name              = "${var.job_name}-scheduled"
   type              = "SCHEDULED"
-  schedule          = "cron(0 2 * * ? *)" # Run at 2 AM UTC daily
+  schedule          = var.trigger_schedule
   description       = "Daily scheduled trigger for ETL job"
   start_on_creation = true
 
