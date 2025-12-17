@@ -137,24 +137,28 @@ def harmonize_sources(supply: DataFrame, financial: DataFrame) -> DataFrame:
 		"source_system",
 	)
 
+	# Alias DataFrames to avoid ambiguous column references
+	financial_aliased = financial.alias("fin")
+	id_map_subset = id_map.select("seller_id", "corporate_id", "address", "city", "state").alias("id")
+
 	financial_with_ids = (
-		financial.join(id_map.select("seller_id", "corporate_id", "address", "city", "state"), on="seller_id", how="left")
-		.withColumn("corporate_name", F.udf(cleanse_company_name, "string")(F.concat(F.lit("seller "), F.col("seller_id"))))
+		financial_aliased.join(id_map_subset, on="seller_id", how="left")
+		.withColumn("corporate_name", F.udf(cleanse_company_name, "string")(F.concat(F.lit("seller "), F.col("fin.seller_id"))))
 		.withColumn("source_system", F.lit("financial"))
 		.select(
-			"seller_id",
-			"corporate_id",
-			"corporate_name",
-			"address",
-			"city",
-			"state",
+			F.col("fin.seller_id").alias("seller_id"),
+			F.col("id.corporate_id").alias("corporate_id"),
+			F.col("corporate_name"),
+			F.col("id.address").alias("address"),
+			F.col("id.city").alias("city"),
+			F.col("id.state").alias("state"),
 			F.lit(None).cast("int").alias("activity_places"),
 			F.lit(None).cast("string").alias("top_suppliers"),
 			F.lit(None).cast("string").alias("main_customers"),
-			F.col("revenue").cast("double").alias("revenue"),
-			F.col("profit").cast("double").alias("profit"),
-			F.col("transaction_count").cast("int").alias("transaction_count"),
-			"source_system",
+			F.col("fin.revenue").cast("double").alias("revenue"),
+			F.col("fin.profit").cast("double").alias("profit"),
+			F.col("fin.transaction_count").cast("int").alias("transaction_count"),
+			F.col("source_system"),
 		)
 	)
 
